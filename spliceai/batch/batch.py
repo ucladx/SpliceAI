@@ -4,8 +4,10 @@
 import collections
 import logging
 import time
-
+import shelve
+import tempfile
 import numpy as np
+import os
 
 from spliceai.batch.batch_utils import extract_delta_scores, get_preds, encode_batch_records
 
@@ -16,11 +18,12 @@ SequenceType_ALT = 1
 
 
 BatchLookupIndex = collections.namedtuple(
-    'BatchLookupIndex', 'sequence_type tensor_size batch_index'
+    #                    ref/alt       size        batch for this size    index in current batch for this size
+    'BatchLookupIndex', 'sequence_type tensor_size batch_ix batch_index'
 )
 
 PreparedVCFRecord = collections.namedtuple(
-    'PreparedVCFRecord', 'vcf_record gene_info locations'
+    'PreparedVCFRecord', 'vcf_idx gene_info locations'
 )
 
 
@@ -43,88 +46,91 @@ class VCFPredictionBatch:
         self.batch_predictions = 0
         self.total_predictions = 0
         self.total_vcf_records = 0
+        self.batch_counters = {}
 
-    def _clear_batch(self):
-        self.batch_predictions = 0
-        self.batches.clear()
-        del self.prepared_vcf_records[:]
+        # shelves to track data. 
+        self.tmpdir = tempfile.TemporaryDirectory()
+        # store batches of predictions using 'tensor_size|batch_idx' as key.
+        self.shelf_preds = shelve.open(os.path.join(self.tmpdir.name,"spliceai_preds.shelf"))
+        # track records to have order correct
+        self.shelf_records = shelve.open(os.path.join(self.tmpdir.name,"spliceai_records.shelf"))
 
-    def _process_batch(self):
+
+    def _process_batch(self,tensor_size):
         start = time.time()
-        total_batch_predictions = 0
-        logger.debug('Starting process_batch')
-
+        # get last batch for this tensor_size
+        batch_ix = self.batch_counters[tensor_size]
+        batch = self.batches[tensor_size]
         # Sanity check dump of batch sizes
-        batch_sizes = ["{}:{}".format(tensor_size, len(batch)) for tensor_size, batch in self.batches.items()]
-        logger.debug('Batch Sizes: {}'.format(batch_sizes))
+        logger.debug('Tensor size : {} : batch_ix {} : nr.entries : {}'.format(tensor_size, batch_ix , len(batch)))
 
-        # Collect each batch's predictions
-        batch_preds = {}
-        for tensor_size, batch in self.batches.items():
-            # Convert list of encodings into a proper sized numpy matrix
-            prediction_batch = np.concatenate(batch, axis=0)
+        # Convert list of encodings into a proper sized numpy matrix
+        prediction_batch = np.concatenate(batch, axis=0)
+        # Run predictions && add to shelf.
+        self.shelf_preds["{}|{}".format(tensor_size,batch_ix)] = np.mean(
+            get_preds(self.ann, prediction_batch, self.prediction_batch_size), axis=0
+        )
 
-            # Run predictions
-            batch_preds[tensor_size] = np.mean(
-                get_preds(self.ann, prediction_batch, self.prediction_batch_size), axis=0
-            )
-
-        # Iterate over original list of vcf records, reconstructing record with annotations
-        for prepared_record in self.prepared_vcf_records:
-            record_predictions = self._write_record(prepared_record, batch_preds)
-            total_batch_predictions += record_predictions
-
-        self._clear_batch()
+        # clear the batch.
+        self.batches[tensor_size] = []
+        # initialize the next batch_ix
+        self.batch_counters[tensor_size] += 1
+        
         logger.debug('Predictions: {}, VCF Records: {}'.format(self.total_predictions, self.total_vcf_records))
         duration = time.time() - start
-        preds_per_sec = total_batch_predictions / duration
+        preds_per_sec = len(batch) / duration
         preds_per_hour = preds_per_sec * 60 * 60
         logger.debug('Finished in {:0.2f}s, per sec: {:0.2f}, per hour: {:0.2f}'.format(duration,
                                                                                         preds_per_sec,
                                                                                         preds_per_hour))
 
-    def _write_record(self, prepared_record, batch_preds):
-        record = prepared_record.vcf_record
-        gene_info = prepared_record.gene_info
-        record_predictions = 0
+    # wrapper to write out all shelved variants
+    def write_records(self, vcf):
+        line_idx = 0
+        for record in vcf:
+            line_idx += 1  
+            # get prepared record by line_idx
+            prepared_record = self.shelf_records[str(line_idx)]
+            #record = prepared_record.vcf_record
+            gene_info = prepared_record.gene_info
+            record_predictions = 0
 
-        all_y_ref = []
-        all_y_alt = []
+            all_y_ref = []
+            all_y_alt = []
 
-        # Each prediction in the batch is located and put into the correct y
-        for location in prepared_record.locations:
-            # No prediction here
-            if location.tensor_size == 0:
+            # Each prediction in the batch is located and put into the correct y
+            for location in prepared_record.locations:
+                # No prediction here
+                if location.tensor_size == 0:
+                    if location.sequence_type == SequenceType_REF:
+                        all_y_ref.append(None)
+                    else:
+                        all_y_alt.append(None)
+                    continue
+                
+                # Extract the prediction from the batch into a list of predictions for this record
+                batch = self.shelf_preds["{}|{}".format(location.tensor_size,location.batch_ix)] # batch_preds[location.tensor_size]
                 if location.sequence_type == SequenceType_REF:
-                    all_y_ref.append(None)
+                    all_y_ref.append(batch[[location.batch_index], :, :])
                 else:
-                    all_y_alt.append(None)
-                continue
+                    all_y_alt.append(batch[[location.batch_index], :, :])
+            delta_scores = extract_delta_scores(
+                all_y_ref=all_y_ref,
+                all_y_alt=all_y_alt,
+                record=record,
+                ann=self.ann,
+                dist_var=self.dist,
+                mask=self.mask,
+                gene_info=gene_info,
+            )
 
-            # Extract the prediction from the batch into a list of predictions for this record
-            batch = batch_preds[location.tensor_size]
-            if location.sequence_type == SequenceType_REF:
-                all_y_ref.append(batch[[location.batch_index], :, :])
-            else:
-                all_y_alt.append(batch[[location.batch_index], :, :])
+            # If there are predictions, write them to the VCF INFO section
+            if len(delta_scores) > 0:
+                record.info['SpliceAI'] = delta_scores
+                record_predictions += len(delta_scores)
 
-        delta_scores = extract_delta_scores(
-            all_y_ref=all_y_ref,
-            all_y_alt=all_y_alt,
-            record=record,
-            ann=self.ann,
-            dist_var=self.dist,
-            mask=self.mask,
-            gene_info=gene_info,
-        )
-
-        # If there are predictions, write them to the VCF INFO section
-        if len(delta_scores) > 0:
-            record.info['SpliceAI'] = delta_scores
-            record_predictions += len(delta_scores)
-
-        self.output.write(record)
-        return record_predictions
+            self.output.write(record)
+    
 
     def add_record(self, record):
         """
@@ -135,7 +141,7 @@ class VCFPredictionBatch:
         are made, it knows where to look up the corresponding prediction for the vcf record.
 
         Once the batch size hits it's capacity, it'll process all the predictions for the
-        encoded batches.
+        encoded batch.
         """
 
         self.total_vcf_records += 1
@@ -160,7 +166,7 @@ class VCFPredictionBatch:
             if len(encoded_seq) == 0:
                 # Add BatchLookupIndex with zeros so when the batch collects the outputs
                 # it knows that there is no prediction for this record
-                batch_lookup_indexes.append(BatchLookupIndex(var_type, 0, 0))
+                batch_lookup_indexes.append(BatchLookupIndex(var_type, 0, 0, 0))
                 continue
 
             # Iterate over the encoded sequence and drop into the correct batch by size and
@@ -172,29 +178,39 @@ class VCFPredictionBatch:
                 # Create batch for this size
                 if tensor_size not in self.batches:
                     self.batches[tensor_size] = []
+                    self.batch_counters[tensor_size] = 0
 
-                # Add encoded record to batch
+                # Add encoded record to batch 'n' for tensor_size 
                 self.batches[tensor_size].append(row)
 
                 # Get the index of the record we just added in the batch
                 cur_batch_record_ix = len(self.batches[tensor_size]) - 1
 
                 # Store a reference so we can pull out the prediction for this item from the batches
-                batch_lookup_indexes.append(BatchLookupIndex(var_type, tensor_size, cur_batch_record_ix))
+                batch_lookup_indexes.append(BatchLookupIndex(var_type, tensor_size, self.batch_counters[tensor_size] , cur_batch_record_ix))
 
         # Save the batch locations for this record on the composite object
         prepared_record = PreparedVCFRecord(
-            vcf_record=record, gene_info=gene_info, locations=batch_lookup_indexes
+            vcf_idx=self.total_vcf_records, gene_info=gene_info, locations=batch_lookup_indexes
         )
-        self.prepared_vcf_records.append(prepared_record)
+        #  add to shelf by vcf_idx
+        self.shelf_records[str(self.total_vcf_records)] = prepared_record
 
         # If we're reached our threshold for the max items to process, then process the batch
-        if self.batch_predictions >= self.prediction_batch_size:
-            self._process_batch()
+        for tensor_size in self.batch_counters:
+            if len(self.batches[tensor_size]) >= self.prediction_batch_size:
+                logger.debug("Batch {} full. Processing".format(tensor_size))
+                self._process_batch(tensor_size)
+        
+
 
     def finish(self):
         """
-        Method to process all the remaining items that have been added to the batch.
+        Method to process all the remaining items that have been added to the batches.
         """
-        if len(self.prepared_vcf_records) > 0:
-            self._process_batch()
+        #if len(self.prepared_vcf_records) > 0:
+        #    self._process_batch()
+        logger.debug("Processing remaining batches")
+        for tensor_size in self.batch_counters:
+                if len(self.batches[tensor_size] ) > 0:
+                    self._process_batch(tensor_size)

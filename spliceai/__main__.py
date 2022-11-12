@@ -118,13 +118,28 @@ def run_spliceai(input_data, output_data, reference, annotation, distance, mask,
             if len(scores) > 0:
                 record.info['SpliceAI'] = scores
             output_data.write(record)
+   
+    # close VCF
+    vcf.close()
 
     if batch:
         # Ensure we process any leftover records in the batch when we finish iterating the VCF. This
         # would be a good candidate for a context manager if we removed the original non batching code above
         batch.finish()
-
-    vcf.close()
+        # Iterate over original list of vcf records again, reconstructing record with annotations from shelved data
+        vcf = pysam.VariantFile(input_data)
+        # have to update header again
+        header = vcf.header
+        header.add_line('##INFO=<ID=SpliceAI,Number=.,Type=String,Description="SpliceAIv1.3.1 variant '
+                    'annotation. These include delta scores (DS) and delta positions (DP) for '
+                    'acceptor gain (AG), acceptor loss (AL), donor gain (DG), and donor loss (DL). '
+                    'Format: ALLELE|SYMBOL|DS_AG|DS_AL|DS_DG|DS_DL|DP_AG|DP_AL|DP_DG|DP_DL">')
+        batch.write_records(vcf)
+        # close shelves
+        batch.shelf_records.close()
+        batch.shelf_preds.close()
+        
+    
     output_data.close()
 
 
