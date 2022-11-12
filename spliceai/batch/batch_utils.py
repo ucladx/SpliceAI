@@ -67,9 +67,19 @@ def extract_delta_scores(
     for alt_ix in range(len(record.alts)):
         for gene_ix in range(len(gene_info.idxs)):
 
+            
             # Pull prediction out of batch
-            y_ref = all_y_ref[pred_ix]
-            y_alt = all_y_alt[pred_ix]
+            try:
+                y_ref = all_y_ref[pred_ix]
+                y_alt = all_y_alt[pred_ix]
+            except IndexError:
+                logger.warn("No data for record below, alt_ix {} : gene_ix {} : pred_ix {}".format(alt_ix, gene_ix,pred_ix))
+                logger.warn(record)
+                continue
+            except Exception as e:
+                logger.error("Predction error: {}".format(e))
+                logger.error(record)
+                raise e
 
             # No prediction here
             if y_ref is None or y_alt is None:
