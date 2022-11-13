@@ -37,7 +37,8 @@ class VCFPredictionBatch:
         self.prediction_batch_size = prediction_batch_size
         # This is the size of the batch tensorflow will use to make the predictions
         self.tensorflow_batch_size = tensorflow_batch_size
-
+        # track runtime
+        self.start_time = time.time()
         # Batch vars
         self.batches = {}
         self.prepared_vcf_records = []
@@ -47,6 +48,7 @@ class VCFPredictionBatch:
         self.total_predictions = 0
         self.total_vcf_records = 0
         self.batch_counters = {}
+        
 
         # shelves to track data. 
         self.tmpdir = tempfile.TemporaryDirectory()

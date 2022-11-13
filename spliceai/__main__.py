@@ -5,6 +5,7 @@ import sys
 import argparse
 import logging
 import pysam
+import time
 
 from spliceai.batch.batch import VCFPredictionBatch
 from spliceai.utils import Annotator, get_delta_scores
@@ -53,12 +54,16 @@ def main():
     args = get_options()
 
     if args.verbose:
-        logging.basicConfig(
-            format='%(asctime)s %(levelname)s %(name)s: - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
-            level=logging.DEBUG,
-        )
+        loglevel = logging.DEBUG
+    else:
+        loglevel = logging.INFO
 
+    logging.basicConfig(
+        format='%(asctime)s %(levelname)s %(name)s: - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        level=logging.DEBUG,
+    )
+    
     if None in [args.I, args.O, args.D, args.M]:
         logging.error('Usage: spliceai [-h] [-I [input]] [-O [output]] -R reference -A annotation '
                       '[-D [distance]] [-M [mask]] [-B [prediction_batch_size]] [-T [tensorflow_batch_size]]')
@@ -126,6 +131,10 @@ def run_spliceai(input_data, output_data, reference, annotation, distance, mask,
         # Ensure we process any leftover records in the batch when we finish iterating the VCF. This
         # would be a good candidate for a context manager if we removed the original non batching code above
         batch.finish()
+        # stats without writing phase
+        duration = time.time() - batch.start_time
+        preds_per_sec = batch.total_predictions / duration
+        preds_per_hour = preds_per_sec * 60 * 60
         # Iterate over original list of vcf records again, reconstructing record with annotations from shelved data
         vcf = pysam.VariantFile(input_data)
         # have to update header again
@@ -141,6 +150,14 @@ def run_spliceai(input_data, output_data, reference, annotation, distance, mask,
         
     
     output_data.close()
+    ## stats
+    if batch:
+        duration = time.time() - batch.start_time
+        logging.info("Analysis Finished. Statistics:")
+        logging.info("Total RunTime: {:0.2f}s".format(duration))
+        logging.info("Processed Records: {}".format(batch.total_vcf_records))
+        logging.info("Processed Predictions: {}".format(batch.total_predictions))
+        logging.info("Overall performance : {:0.2f} predictions/sec ; {:0.2f} predictions/hour".format(preds_per_sec, preds_per_hour))
 
 
 if __name__ == '__main__':
