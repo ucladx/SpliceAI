@@ -70,7 +70,7 @@ class VCFPredictionBatch:
         prediction_batch = np.concatenate(batch, axis=0)
         # Run predictions && add to shelf.
         self.shelf_preds["{}|{}".format(tensor_size,batch_ix)] = np.mean(
-            get_preds(self.ann, prediction_batch, self.prediction_batch_size), axis=0
+            get_preds(self.ann, prediction_batch, self.tensorflow_batch_size), axis=0
         )
 
         # clear the batch.
