@@ -6,8 +6,11 @@ import argparse
 import logging
 import pysam
 import time
+import tempfile
+from multiprocessing import Process,Queue
 
 from spliceai.batch.batch import VCFPredictionBatch
+from spliceai.batch.batch_utils import prepare_batches
 from spliceai.utils import Annotator, get_delta_scores
 
 try:
@@ -61,7 +64,7 @@ def main():
     logging.basicConfig(
         format='%(asctime)s %(levelname)s %(name)s: - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        level=logging.DEBUG,
+        level=loglevel,
     )
     
     if None in [args.I, args.O, args.D, args.M]:
@@ -72,14 +75,94 @@ def main():
     # Default the tensorflow batch size to the prediction_batch_size if it's not supplied in the args
     tensorflow_batch_size = args.tensorflow_batch_size if args.tensorflow_batch_size else args.prediction_batch_size
 
-    run_spliceai(input_data=args.I, output_data=args.O, reference=args.R,
-                 annotation=args.A, distance=args.D, mask=args.M,
-                 prediction_batch_size=args.prediction_batch_size,
-                 tensorflow_batch_size=tensorflow_batch_size)
+    # load annotation data:
+    ann = Annotator(args.R, args.A)
+    ## revised code for batched analysis
+    if args.prediction_batch_size > 1:
+        run_spliceai_batched(input_data=args.I, output_data=args.O, reference=args.R,
+             ann=ann, distance=args.D, mask=args.M,
+             prediction_batch_size=args.prediction_batch_size,
+             tensorflow_batch_size=tensorflow_batch_size)
+    else: # run original code:
+        run_spliceai(input_data=args.I, output_data=args.O, ann=ann, distance=args.D, mask=args.M)
 
-
-def run_spliceai(input_data, output_data, reference, annotation, distance, mask, prediction_batch_size,
+## revised logic to allow batched tensorflow analysis
+def run_spliceai_batched(input_data, output_data, reference, ann, distance, mask, prediction_batch_size,
                  tensorflow_batch_size):
+    
+    ## mk a temp directory 
+    tmpdir = tempfile.TemporaryDirectory()
+    # initialize the prediction object
+    batch = VCFPredictionBatch(
+            ann=ann,
+            output=output_data,
+            dist=distance,
+            mask=mask,
+            prediction_batch_size=prediction_batch_size,
+            tensorflow_batch_size=tensorflow_batch_size,
+            tmpdir = tmpdir
+        )
+    
+    # creates a queue with max 10 ready-to-go batches in it.
+    # starts processing & filling the queue.
+    prediction_queue = Queue(maxsize=10)
+    reader = Process(target=prepare_batches, kwargs={'ann':ann, 
+                                                     'input_data':input_data, 
+                                                     'prediction_batch_size':prediction_batch_size, 
+                                                     'prediction_queue': prediction_queue,
+                                                     'tmpdir':tmpdir,
+                                                     'dist' : distance
+                                                    })
+    reader.start()    
+    
+    # Process the queue.
+    batch.process_batches(prediction_queue)
+
+    # join the reader process.
+    reader.join()
+
+    # stats without writing phase
+    prediction_duration = time.time() - batch.start_time
+    
+    # write results.
+    # Iterate over original list of vcf records again, reconstructing record with annotations from shelved data
+    logging.debug("Writing output file")
+    vcf = pysam.VariantFile(input_data)
+    # have to update header again
+    header = vcf.header
+    header.add_line('##INFO=<ID=SpliceAI,Number=.,Type=String,Description="SpliceAIv1.3.1 variant '
+                'annotation. These include delta scores (DS) and delta positions (DP) for '
+                'acceptor gain (AG), acceptor loss (AL), donor gain (DG), and donor loss (DL). '
+                'Format: ALLELE|SYMBOL|DS_AG|DS_AL|DS_DG|DS_DL|DP_AG|DP_AL|DP_DG|DP_DL">')
+    try:
+        batch.output_data = pysam.VariantFile(output_data, mode='w', header=header)
+        
+    except (IOError, ValueError) as e:
+        logging.error('{}'.format(e))
+        exit()
+
+    batch.write_records(vcf)
+    # close shelf
+    batch.shelf_preds.close()
+    # close vcf
+    vcf.close()
+    batch.output_data.close()
+
+
+    ## stats
+    overall_duration = time.time() - batch.start_time
+    preds_per_sec = batch.total_predictions / prediction_duration
+    preds_per_hour = preds_per_sec * 60 * 60
+    logging.info("Analysis Finished. Statistics:")
+    logging.info("Total RunTime: {:0.2f}s".format(overall_duration))
+    logging.info("Prediction RunTime: {:0.2f}s".format(prediction_duration))
+    logging.info("Processed Records: {}".format(batch.total_vcf_records))
+    logging.info("Processed Predictions: {}".format(batch.total_predictions))
+    logging.info("Overall performance : {:0.2f} predictions/sec ; {:0.2f} predictions/hour".format(preds_per_sec, preds_per_hour))
+
+
+# original flow : record by record reading/predict/write
+def run_spliceai(input_data, output_data, ann, distance, mask):
 
     try:
         vcf = pysam.VariantFile(input_data)
@@ -99,26 +182,7 @@ def run_spliceai(input_data, output_data, reference, annotation, distance, mask,
         logging.error('{}'.format(e))
         exit()
 
-    ann = Annotator(reference, annotation)
-    batch = None
-
-    # Only use the batching code if we are batching
-    if prediction_batch_size > 1:
-        batch = VCFPredictionBatch(
-            ann=ann,
-            output=output_data,
-            dist=distance,
-            mask=mask,
-            prediction_batch_size=prediction_batch_size,
-            tensorflow_batch_size=tensorflow_batch_size,
-        )
-
     for record in vcf:
-        if batch:
-            # Add record to batch, if batch fills, then they will all be processed at once
-            batch.add_record(record)
-        else:
-            # If we're not batching, let's run the original code
             scores = get_delta_scores(record, ann, distance, mask)
             if len(scores) > 0:
                 record.info['SpliceAI'] = scores
@@ -126,39 +190,7 @@ def run_spliceai(input_data, output_data, reference, annotation, distance, mask,
    
     # close VCF
     vcf.close()
-
-    if batch:
-        # Ensure we process any leftover records in the batch when we finish iterating the VCF. This
-        # would be a good candidate for a context manager if we removed the original non batching code above
-        batch.finish()
-        # stats without writing phase
-        duration = time.time() - batch.start_time
-        preds_per_sec = batch.total_predictions / duration
-        preds_per_hour = preds_per_sec * 60 * 60
-        # Iterate over original list of vcf records again, reconstructing record with annotations from shelved data
-        vcf = pysam.VariantFile(input_data)
-        # have to update header again
-        header = vcf.header
-        header.add_line('##INFO=<ID=SpliceAI,Number=.,Type=String,Description="SpliceAIv1.3.1 variant '
-                    'annotation. These include delta scores (DS) and delta positions (DP) for '
-                    'acceptor gain (AG), acceptor loss (AL), donor gain (DG), and donor loss (DL). '
-                    'Format: ALLELE|SYMBOL|DS_AG|DS_AL|DS_DG|DS_DL|DP_AG|DP_AL|DP_DG|DP_DL">')
-        batch.write_records(vcf)
-        # close shelves
-        batch.shelf_records.close()
-        batch.shelf_preds.close()
-        
-    
     output_data.close()
-    ## stats
-    if batch:
-        duration = time.time() - batch.start_time
-        logging.info("Analysis Finished. Statistics:")
-        logging.info("Total RunTime: {:0.2f}s".format(duration))
-        logging.info("Processed Records: {}".format(batch.total_vcf_records))
-        logging.info("Processed Predictions: {}".format(batch.total_predictions))
-        logging.info("Overall performance : {:0.2f} predictions/sec ; {:0.2f} predictions/hour".format(preds_per_sec, preds_per_hour))
-
 
 if __name__ == '__main__':
     main()
