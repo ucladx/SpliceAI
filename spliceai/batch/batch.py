@@ -1,30 +1,24 @@
 # Original source code modified to add prediction batching support by Invitae in 2021.
 # Modifications copyright (c) 2021 Invitae Corporation.
 
-#import collections
+# Invitae source code modified to improve GPU utilization
+# Modifications made by Geert Vandeweyer (Antwerp University Hospital, Belgium)
+
 import logging
 import time
 import shelve
 import numpy as np
 import os
+import tensorflow as tf
+import pickle
 
-from spliceai.batch.batch_utils import extract_delta_scores, get_preds, encode_batch_records
-from multiprocessing import Queue,Process
+from spliceai.batch.batch_utils import extract_delta_scores, get_preds
 
 logger = logging.getLogger(__name__)
 
 SequenceType_REF = 0
 SequenceType_ALT = 1
 
-
-#BatchLookupIndex = collections.namedtuple(
-#    #                    ref/alt       size        batch for this size    index in current batch for this size
-#    'BatchLookupIndex', 'sequence_type tensor_size batch_ix batch_index'
-#)
-
-#PreparedVCFRecord = collections.namedtuple(
-#    'PreparedVCFRecord', 'vcf_idx gene_info locations'
-#)
 
 # Class to handle predictions
 class VCFPredictionBatch:
@@ -62,31 +56,28 @@ class VCFPredictionBatch:
             # reader submits None when all are queued.
             if item is None:
                 break
-            self._process_batch(item['tensor_size'],item['batch_ix'], item['data'])
+            # load pickled object
+            with open(os.path.join(self.tmpdir.name,item),'rb') as p:
+                data = pickle.load(p)
+            # remove from disk.
+            os.unlink(os.path.join(self.tmpdir.name,item))
+            self._process_batch(data['tensor_size'],data['batch_ix'], data['data'],data['length'])
+            
 
-    def _process_batch(self,tensor_size,batch_ix, batch):
+    def _process_batch(self,tensor_size,batch_ix, prediction_batch,nr_preds):
         start = time.time()
-        # get last batch for this tensor_size
-        #batch_ix = self.batch_counters[tensor_size]
-        #batch = self.batches[tensor_size]
+        
         # Sanity check dump of batch sizes
-        logger.debug('Tensor size : {} : batch_ix {} : nr.entries : {}'.format(tensor_size, batch_ix , len(batch)))
+        logger.debug('Tensor size : {} : batch_ix {} : nr.entries : {}'.format(tensor_size, batch_ix , nr_preds))
 
-        # Convert list of encodings into a proper sized numpy matrix
-        prediction_batch = np.concatenate(batch, axis=0)
         # Run predictions && add to shelf.
         self.shelf_preds["{}|{}".format(tensor_size,batch_ix)] = np.mean(
             get_preds(self.ann, prediction_batch, self.tensorflow_batch_size), axis=0
         )
-
-        # clear the batch.
-        #self.batches[tensor_size] = []
-        # initialize the next batch_ix
-        #self.batch_counters[tensor_size] += 1
         
-        #logger.debug('Predictions: {}, VCF Records: {}'.format(self.total_predictions, self.total_vcf_records))
+        # status
         duration = time.time() - start
-        preds_per_sec = len(batch) / duration
+        preds_per_sec = nr_preds / duration
         preds_per_hour = preds_per_sec * 60 * 60
         logger.debug('Finished in {:0.2f}s, per sec: {:0.2f}, per hour: {:0.2f}'.format(duration,
                                                                                         preds_per_sec,
@@ -98,12 +89,15 @@ class VCFPredictionBatch:
         shelf_records = shelve.open(os.path.join(self.tmpdir.name,"spliceai_records.shelf"))
         # parse vcf
         line_idx = 0
+        batch = []
+        last_batch_key = ''
         for record in vcf:
             line_idx += 1  
             # get prepared record by line_idx
             prepared_record = shelf_records[str(line_idx)]
             gene_info = prepared_record.gene_info
-            self.total_predictions += len(record.alts) * len(gene_info.genes)
+            # (REF + #ALT ) * #genes   (* 5 models)
+            self.total_predictions += (1 + len(record.alts)) * len(gene_info.genes)
             
             all_y_ref = []
             all_y_alt = []
@@ -119,7 +113,11 @@ class VCFPredictionBatch:
                     continue
                 
                 # Extract the prediction from the batch into a list of predictions for this record
-                batch = self.shelf_preds["{}|{}".format(location.tensor_size,location.batch_ix)] # batch_preds[location.tensor_size]
+                # recycle the batch variable if key is the same.
+                if not last_batch_key == "{}|{}".format(location.tensor_size,location.batch_ix):
+                    last_batch_key = "{}|{}".format(location.tensor_size,location.batch_ix)
+                    batch = self.shelf_preds[last_batch_key] # batch_preds[location.tensor_size]
+                    
                 if location.sequence_type == SequenceType_REF:
                     all_y_ref.append(batch[[location.batch_index], :, :])
                 else:

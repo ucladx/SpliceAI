@@ -1,12 +1,19 @@
 # Original source code modified to add prediction batching support by Invitae in 2021.
 # Modifications copyright (c) 2021 Invitae Corporation.
 
+# Invitae source code modified to improve GPU utilization
+# Modifications made by Geert Vandeweyer (Antwerp University Hospital, Belgium)
+
+
 import logging
 import shelve
 import pysam
 import collections
 import os
 import gc
+import numpy as np
+import tensorflow as tf
+import pickle
 
 from spliceai.utils import get_alt_gene_delta_score, is_record_valid, get_seq, \
     is_location_predictable, get_cov, get_wid, is_valid_alt_record, encode_seqs, create_unhandled_delta_score
@@ -46,8 +53,7 @@ def prepare_batches(ann, input_data,prediction_batch_size, prediction_queue,tmpd
 def get_preds(ann, x, batch_size=32):
     logger.debug('Running get_preds with matrix size: {}'.format(x.shape))
     try:
-        predictions = [ann.models[m].predict(x, batch_size=batch_size, verbose=0) for m in range(5)]
-        
+        predictions = [ann.models[m].predict(x, batch_size=batch_size, verbose=0) for m in range(5)]  
     except Exception as e:
         # try a smaller batch (less efficient, but lower on memory). if it crashes again : it raises.
         logger.warning("TF.predict failed ({}).Retrying with smaller batch size".format(e))
@@ -271,11 +277,20 @@ class VCFReader:
         for tensor_size in self.batch_counters:
             if len(self.batches[tensor_size]) >= self.prediction_batch_size:
                 logger.debug("Batch {} full. Adding to queue".format(tensor_size))
-                queue_item = {'tensor_size': tensor_size, 'batch_ix': self.batch_counters[tensor_size], 'data' : self.batches[tensor_size]}
-                self.prediction_queue.put(queue_item)
+                # fully prep the batch outside of gpu routine...
+                data = np.concatenate(self.batches[tensor_size])
+                concat_len = len(data)
+                # offload conversion of batch from np to tensor to CPU
+                with tf.device('CPU:0'):
+                    data = tf.convert_to_tensor(data)
+                queue_item = {'tensor_size': tensor_size, 'batch_ix': self.batch_counters[tensor_size], 'data' : data, 'length':concat_len}
+                with open(os.path.join(self.tmpdir.name,"{}--{}.in.pickle".format(tensor_size,self.batch_counters[tensor_size])),"wb") as p:
+                    pickle.dump(queue_item,p)
+                self.prediction_queue.put("{}--{}.in.pickle".format(tensor_size,self.batch_counters[tensor_size]))
+                
                 # reset
                 self.batches[tensor_size] = []
-                self.batch_counters[tensor_size] += 10
+                self.batch_counters[tensor_size] += 1
 
                 #self._process_batch(tensor_size)
         
@@ -290,8 +305,16 @@ class VCFReader:
         logger.debug("Queueing remaining batches")
         for tensor_size in self.batch_counters:
                 if len(self.batches[tensor_size] ) > 0:
-                    queue_item = {'tensor_size': tensor_size, 'batch_ix': self.batch_counters[tensor_size], 'data' : self.batches[tensor_size]}
-                    self.prediction_queue.put(queue_item)
+                    # fully prep the batch outside of gpu routine...
+                    data = np.concatenate(self.batches[tensor_size])
+                    concat_len = len(data)
+                    # offload conversion of batch from np to tensor to CPU
+                    with tf.device('CPU:0'):
+                        data = tf.convert_to_tensor(data)
+                    queue_item = {'tensor_size': tensor_size, 'batch_ix': self.batch_counters[tensor_size], 'data' : data, 'length':concat_len}
+                    with open(os.path.join(self.tmpdir.name,"{}--{}.in.pickle".format(tensor_size,self.batch_counters[tensor_size])),"wb") as p:
+                         pickle.dump(queue_item,p)
+                    self.prediction_queue.put("{}--{}.in.pickle".format(tensor_size,self.batch_counters[tensor_size]))
                     # clear
                     self.batches[tensor_size] = []
         # all done : 

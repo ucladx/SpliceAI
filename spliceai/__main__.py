@@ -48,6 +48,9 @@ def get_options():
     parser.add_argument('-T', '--tensorflow-batch-size', metavar='tensorflow_batch_size', type=int,
                         help='tensorflow batch size for model predictions')
     parser.add_argument('-V', '--verbose', action='store_true', help='enables verbose logging')
+    parser.add_argument('-t',metavar='tmpdir',type=str,default='/tmp/',required=False,
+                        help="Use Alternate location to store tmp files. (Note: B=4096 equals to roughly 15Gb of tmp files)")
+
     args = parser.parse_args()
 
     return args
@@ -69,7 +72,7 @@ def main():
     
     if None in [args.I, args.O, args.D, args.M]:
         logging.error('Usage: spliceai [-h] [-I [input]] [-O [output]] -R reference -A annotation '
-                      '[-D [distance]] [-M [mask]] [-B [prediction_batch_size]] [-T [tensorflow_batch_size]]')
+                      '[-D [distance]] [-M [mask]] [-B [prediction_batch_size]] [-T [tensorflow_batch_size]] [-t [tmp_location]]')
         exit()
 
     # Default the tensorflow batch size to the prediction_batch_size if it's not supplied in the args
@@ -82,16 +85,17 @@ def main():
         run_spliceai_batched(input_data=args.I, output_data=args.O, reference=args.R,
              ann=ann, distance=args.D, mask=args.M,
              prediction_batch_size=args.prediction_batch_size,
-             tensorflow_batch_size=tensorflow_batch_size)
+             tensorflow_batch_size=tensorflow_batch_size,tempdir=args.t)
     else: # run original code:
         run_spliceai(input_data=args.I, output_data=args.O, ann=ann, distance=args.D, mask=args.M)
 
 ## revised logic to allow batched tensorflow analysis
 def run_spliceai_batched(input_data, output_data, reference, ann, distance, mask, prediction_batch_size,
-                 tensorflow_batch_size):
+                 tensorflow_batch_size,tempdir):
     
     ## mk a temp directory 
-    tmpdir = tempfile.TemporaryDirectory()
+    tmpdir = tempfile.TemporaryDirectory(dir=tempdir)
+    logging.debug("tmp dir : {}".format(tmpdir.name))
     # initialize the prediction object
     batch = VCFPredictionBatch(
             ann=ann,
