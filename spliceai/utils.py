@@ -1,6 +1,9 @@
 # Original source code modified to add prediction batching support by Invitae in 2021.
 # Modifications copyright (c) 2021 Invitae Corporation.
 
+# Invitae source code modified to improve GPU utilization
+# Modifications made by Geert Vandeweyer (Antwerp University Hospital, Belgium)
+
 import collections
 
 from pkg_resources import resource_filename
@@ -215,8 +218,8 @@ def get_delta_scores(record, ann, dist_var, mask):
                                        alt_ix=alt_ix,
                                        wid=wid)
 
-            y_ref = np.mean([ann.models[m].predict(x_ref) for m in range(5)], axis=0)
-            y_alt = np.mean([ann.models[m].predict(x_alt) for m in range(5)], axis=0)
+            y_ref = np.mean([ann.models[m].predict(x_ref,verbose=0) for m in range(5)], axis=0)
+            y_alt = np.mean([ann.models[m].predict(x_alt,verbose=0) for m in range(5)], axis=0)
 
             delta_score = get_alt_gene_delta_score(record=record,
                                                    ann=ann,
