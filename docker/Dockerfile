@@ -54,7 +54,7 @@ RUN mkdir /opt/conda && \
     micromamba clean --all --yes
 
 # Break cache for recloning git
-ENV DATE_CACHE_BREAK=$(date)
+ARG DATE_CACHE_BREAK=$(date)
 
 # my fork of spliceai : has gpu optimizations
 RUN cd /opt/ && \
