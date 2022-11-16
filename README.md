@@ -91,7 +91,7 @@ are running the script on. Feel free to experiment, but some reasonable `-T` num
 |               | invitae    | 76m | ~137,000 pred / h |
 |               | invitae v2 | 63m | ~166,000 pred / h |
 |               | invitae v2 optimal | 52m | ~200,000 pred / h |
-| V100 GPU (AWS p3.xlarge) | illumina</sup>b</sup> | ~10h | ~18,000 pred/h |
+| V100 GPU (AWS p3.xlarge) | illumina<sup>b</sup> | ~10h | ~18,000 pred/h |
 |                | invitae     | 78m | ~135,000 pred / h |
 |                | invitae v2  | 54m | ~190,000 pred / h |  
 |                | invitae v2 optimal | 31 m | ~335,000 pred / h |
