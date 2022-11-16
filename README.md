@@ -95,7 +95,7 @@ are running the script on. Feel free to experiment, but some reasonable `-T` num
 |                | invitae     | 78m | ~135,000 pred / h |
 |                | invitae v2  | 54m | ~190,000 pred / h |  
 |                | invitae v2 optimal | 31 m | ~335,000 pred / h |
-|  
+  
 
 <sup>(a)</sup> : Extrapolated from first 500 variants
 
