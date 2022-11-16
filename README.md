@@ -13,7 +13,7 @@ SpliceAI source code is provided under the [GPLv3 license](LICENSE). SpliceAI in
 This release can most easily be used as a docker container: 
 
 ```sh
-docker pull cmgantwerpen/spliceai_v1.3
+docker pull cmgantwerpen/spliceai_v1.3:latest
 
 docker run --gpus all cmgantwerpen/spliceai_v1.3:latest spliceai -h 
 ```
@@ -98,6 +98,7 @@ are running the script on. Feel free to experiment, but some reasonable `-T` num
 |  
 
 <sup>(a)</sup> : Extrapolated from first 500 variants
+
 <sup>(b)</sup> : Illumina implementation showed a memory leak with the installed versions of tf/keras/.... Values extrapolated from incomplete runs at the point of OOM. 
 
 
@@ -170,7 +171,12 @@ donor_prob = y[0, :, 2]
 * Adds batch utility methods that split up what was all previously done in `get_delta_scores`. `encode_batch_record` handles what was in the first half, taking in the VCF record and generating one-hot encoded matrices for the ref/alts. `extract_delta_scores` handles the second half of the `get_delta_scores` by reassembling the annotations based on the batched predictions
 * Adds test cases to run a small file using a generated FASTA reference to test if the results are the same with no batching and with different batching sizes
 * Slightly modifies the entrypoint of running the code to allow for easier unit testing. Being able to pass in what would normally come from the argparser
+* Offload more code to CPU (eg np to tensor conversion) to *only* perform predictions on the GPU
+* Implement queuing system to always have full batches ready for prediction
+* Implement new parameter, `--tmpdir` to support a custom tmp folder
+
 
 ### Contact
 Kishore Jaganathan: kjaganathan@illumina.com
+
 Geert Vandeweyer (This implementation) : geert.vandeweyer@uza.be
