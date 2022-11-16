@@ -12,7 +12,8 @@ SpliceAI source code is provided under the [GPLv3 license](LICENSE). SpliceAI in
 
 This release can most easily be used as a docker container: 
 
-```docker pull cmgantwerpen/spliceai_v1.3
+```sh
+docker pull cmgantwerpen/spliceai_v1.3
 
 docker run --gpus all cmgantwerpen/spliceai_v1.3:latest spliceai -h 
 ```
