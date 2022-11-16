@@ -24,21 +24,21 @@ except ImportError:
 def get_options():
 
     parser = argparse.ArgumentParser(description='Version: 1.3.1')
-    parser.add_argument('-I', metavar='input', nargs='?', default=std_in,
+    parser.add_argument('-I', '--input', metavar='input', nargs='?', default=std_in,
                         help='path to the input VCF file, defaults to standard in')
-    parser.add_argument('-O', metavar='output', nargs='?', default=std_out,
+    parser.add_argument('-O', '--output', metavar='output', nargs='?', default=std_out,
                         help='path to the output VCF file, defaults to standard out')
-    parser.add_argument('-R', metavar='reference', required=True,
+    parser.add_argument('-R', '--reference', metavar='reference', required=True,
                         help='path to the reference genome fasta file')
-    parser.add_argument('-A', metavar='annotation', required=True,
+    parser.add_argument('-A', '--annotation',metavar='annotation', required=True,
                         help='"grch37" (GENCODE V24lift37 canonical annotation file in '
                              'package), "grch38" (GENCODE V24 canonical annotation file in '
                              'package), or path to a similar custom gene annotation file')
-    parser.add_argument('-D', metavar='distance', nargs='?', default=50,
+    parser.add_argument('-D', '--distance', metavar='distance', nargs='?', default=50,
                         type=int, choices=range(0, 5000),
                         help='maximum distance between the variant and gained/lost splice '
                              'site, defaults to 50')
-    parser.add_argument('-M', metavar='mask', nargs='?', default=0,
+    parser.add_argument('-M', '--mask', metavar='mask', nargs='?', default=0,
                         type=int, choices=[0, 1],
                         help='mask scores representing annotated acceptor/donor gain and '
                              'unannotated acceptor/donor loss, defaults to 0')
@@ -48,7 +48,7 @@ def get_options():
     parser.add_argument('-T', '--tensorflow-batch-size', metavar='tensorflow_batch_size', type=int,
                         help='tensorflow batch size for model predictions')
     parser.add_argument('-V', '--verbose', action='store_true', help='enables verbose logging')
-    parser.add_argument('-t',metavar='tmpdir',type=str,default='/tmp/',required=False,
+    parser.add_argument('-t','--tmpdir', metavar='tmpdir',type=str,default='/tmp/',required=False,
                         help="Use Alternate location to store tmp files. (Note: B=4096 equals to roughly 15Gb of tmp files)")
 
     args = parser.parse_args()
