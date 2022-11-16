@@ -42,7 +42,7 @@ Required parameters:
  - ```-I```: Input VCF with variants of interest.
  - ```-O```: Output VCF with SpliceAI predictions `ALLELE|SYMBOL|DS_AG|DS_AL|DS_DG|DS_DL|DP_AG|DP_AL|DP_DG|DP_DL` included in the INFO column (see table below for details). Only SNVs and simple INDELs (REF or ALT is a single base) within genes are annotated. Variants in multiple genes have separate predictions for each gene.
  - ```-R```: Reference genome fasta file. Can be downloaded from [GRCh37/hg19](http://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz) or [GRCh38/hg38](http://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz).
- - ```-A```: Gene annotation file. Can instead provide `grch37` or `grch38` to use GENCODE V24 canonical annotation files included with the package. To create custom gene annotation files, use `spliceai/annotations/grch37.txt` in repository as template.
+ - ```-A```: Gene annotation file. Can instead provide `grch37` or `grch38` to use GENCODE V24 canonical annotation files included with the package. To create custom gene annotation files, use `spliceai/annotations/grch37.txt` in repository as template and provide as full path.
 
 Optional parameters:
  - ```-D```: Maximum distance between the variant and gained/lost splice site (default: 50).
@@ -50,20 +50,48 @@ Optional parameters:
  - ```-B```: Number of predictions to collect before running models on them in batch. (default: 1 (don't batch))
  - ```-T```: Internal Tensorflow `predict()` batch size if you want something different from the `-B` value. (default: the `-B` value)
  - ```-V```: Enable verbose logging during run
+ - ```-t```: Specify a location to create the temporary files
 
-**Batching Considerations:** When setting the batching parameters, be mindful of the system and gpu memory of the machine you 
-are running the script on. Feel free to experiment, but some reasonable `-B` numbers would be 64/128.
+**Batching Considerations:** 
 
-Batching Performance Benchmarks:
+When setting the batching parameters, be mindful of the system and gpu memory of the machine you 
+are running the script on. Feel free to experiment, but some reasonable `-T` numbers would be 64/128. CPU memory is larger, and increasing `-B` might further improve performance.
 
-| Type     | Speed       |
-| -------- | ----------- |
-| n1-standard-2 CPU (GCP) | ~800 per hour |
-| CPU (2019 MacBook Pro) | ~3,000 per hour |
-| K80 GPU (GCP) | ~25,000 per hour |
-| V100 GPU (GCP) | ~150,000 per hour |
+*Batching Performance Benchmarks:*
+- Input data: GATK generated WES sample with ~ 90K variants in genome build GRCh37.
+- Total predictions made : 174,237
+- invitae v2 mainly implements logic to prioritize full batches while predicting 
+- settings : 
+    - invitae & invitae v2 : B = T = 64
+    - invitae v2 optimal : on V100 : B = 4096 ; T = 256 -- on K80/GeForce : B = 4096 ; T = 64
 
-Details of SpliceAI INFO field:
+*Benchmark results*
+
+| Type     | Implementation | Total Time  | Speed (predictions / hour)  |
+| -------- | -------------- | ----------- | --------------------------  |
+| CPU (intel i5-8365U)<sup>a</sup> | illumina    | ~100h | ~1000 pred/h |
+|                       | invitae     | ~39h | ~4500 pred/h |
+|                       | invitae v2  | ~35h | ~5000 pred/h |
+|                       | invitae v2 optimal | ~35h | ~5000 pred/h | 
+| K80 GPU (AWS p2.large) | illumina</sup>b</sup> | ~25 h  | ~7000 pred/h  |
+|               | invitae    | 242m | ~43,000 pred / h |
+|               | invitae v2 | 213m | ~50,000 pred / h |
+|               | invitae v2 optimal | 188 m | ~56,000 pred / h |
+| GeForce RTX 2070 SUPER GPU (desktop) |  illumina</sup>b</sup>    | ~10 h | ~ 17,000 pred/h |
+|               | invitae    | 76m | ~137,000 pred / h |
+|               | invitae v2 | 63m | ~166,000 pred / h |
+|               | invitae v2 optimal | 52m | ~200,000 pred / h |
+| V100 GPU (AWS p3.xlarge) | illumina</sup>b</sup> | ~10h | ~18,000 pred/h |
+|                | invitae     | 78m | ~135,000 pred / h |
+|                | invitae v2  | 54m | ~190,000 pred / h |  
+|                | invitae v2 optimal | 31 m | ~335,000 pred / h |
+|  
+
+<sup>(a)</sup> : Extrapolated from first 500 variants
+<sup>(b)</sup> : Illumina implementation showed a memory leak with the installed versions of tf/keras/.... Values extrapolated from incomplete runs at the point of OOM. 
+
+
+### Details of SpliceAI INFO field:
 
 |    ID    | Description |
 | -------- | ----------- |
@@ -135,3 +163,4 @@ donor_prob = y[0, :, 2]
 
 ### Contact
 Kishore Jaganathan: kjaganathan@illumina.com
+Geert Vandeweyer (This implementation) : geert.vandeweyer@uza.be
