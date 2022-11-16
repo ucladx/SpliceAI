@@ -12,7 +12,7 @@ import numpy as np
 from pyfaidx import Fasta
 from keras.models import load_model
 import logging
-
+import gc
 
 GeneInfo = collections.namedtuple('GeneInfo', 'genes strands idxs')
 
@@ -231,7 +231,7 @@ def get_delta_scores(record, ann, dist_var, mask):
                                                    gene_info=gene_info,
                                                    mask=mask)
             delta_scores.append(delta_score)
-
+    gc.collect()
     return delta_scores
 
 
