@@ -70,7 +70,7 @@ def main():
         level=loglevel,
     )
     
-    if None in [args.I, args.O, args.D, args.M]:
+    if None in [args.input, args.output, args.distance, args.mask]:
         logging.error('Usage: spliceai [-h] [-I [input]] [-O [output]] -R reference -A annotation '
                       '[-D [distance]] [-M [mask]] [-B [prediction_batch_size]] [-T [tensorflow_batch_size]] [-t [tmp_location]]')
         exit()
@@ -79,15 +79,15 @@ def main():
     tensorflow_batch_size = args.tensorflow_batch_size if args.tensorflow_batch_size else args.prediction_batch_size
 
     # load annotation data:
-    ann = Annotator(args.R, args.A)
+    ann = Annotator(args.reference, args.annotation)
     ## revised code for batched analysis
     if args.prediction_batch_size > 1:
-        run_spliceai_batched(input_data=args.I, output_data=args.O, reference=args.R,
-             ann=ann, distance=args.D, mask=args.M,
+        run_spliceai_batched(input_data=args.input, output_data=args.output, reference=args.reference,
+             ann=ann, distance=args.distance, mask=args.mask,
              prediction_batch_size=args.prediction_batch_size,
-             tensorflow_batch_size=tensorflow_batch_size,tempdir=args.t)
+             tensorflow_batch_size=tensorflow_batch_size,tempdir=args.tmpdir)
     else: # run original code:
-        run_spliceai(input_data=args.I, output_data=args.O, ann=ann, distance=args.D, mask=args.M)
+        run_spliceai(input_data=args.input, output_data=args.output, ann=ann, distance=args.distance, mask=args.mask)
 
 ## revised logic to allow batched tensorflow analysis
 def run_spliceai_batched(input_data, output_data, reference, ann, distance, mask, prediction_batch_size,
