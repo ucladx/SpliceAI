@@ -9,16 +9,25 @@ This package annotates genetic variants with their predicted effect on splicing,
 SpliceAI source code is provided under the [GPLv3 license](LICENSE). SpliceAI includes several third party packages provided under other open source licenses, please see [NOTICE](NOTICE) for additional details. The trained models used by SpliceAI (located in this package at spliceai/models) are provided under the [CC BY NC 4.0](LICENSE) license for academic and non-commercial use; other use requires a commercial license from Illumina, Inc.
 
 ### Installation
-The simplest way to install SpliceAI is through pip or conda:
+
+This release can most easily be used as a docker container: 
+
+``' docker pull cmgantwerpen/spliceai_v1.3
+
+docker run --gpus all cmgantwerpen/spliceai_v1.3 spliceai -h 
+```
+
+
+The simplest way to install (the original version of) SpliceAI is through pip or conda:
 ```sh
 pip install spliceai
 # or
 conda install -c bioconda spliceai
 ```
 
-Alternately, SpliceAI can be installed from the [github repository](https://github.com/Illumina/SpliceAI.git):
+Alternately, SpliceAI can be installed from the [github repository](https://github.com/invitae/SpliceAI.git):
 ```sh
-git clone https://github.com/Illumina/SpliceAI.git
+git clone https://github.com/invitae/SpliceAI.git
 cd SpliceAI
 python setup.py install
 ```
