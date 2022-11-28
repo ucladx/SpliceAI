@@ -7,11 +7,16 @@ import logging
 import pysam
 import time
 import tempfile
-from multiprocessing import Process,Queue
+from multiprocessing import Process,Queue,Pool
+from functools import partial
 
-from spliceai.batch.batch import VCFPredictionBatch
-from spliceai.batch.batch_utils import prepare_batches
+import tensorflow as tf
+import subprocess as sp
+import os
+
+from spliceai.batch.batch_utils import prepare_batches,  start_workers,initialize_devices
 from spliceai.utils import Annotator, get_delta_scores
+from spliceai.batch.data_handlers import VCFWriter
 
 try:
     from sys.stdin import buffer as std_in
@@ -24,9 +29,9 @@ except ImportError:
 def get_options():
 
     parser = argparse.ArgumentParser(description='Version: 1.3.1')
-    parser.add_argument('-I', '--input', metavar='input', nargs='?', default=std_in,
+    parser.add_argument('-I', '--input_data', metavar='input', nargs='?', default=std_in,
                         help='path to the input VCF file, defaults to standard in')
-    parser.add_argument('-O', '--output', metavar='output', nargs='?', default=std_out,
+    parser.add_argument('-O', '--output_data', metavar='output', nargs='?', default=std_out,
                         help='path to the output VCF file, defaults to standard out')
     parser.add_argument('-R', '--reference', metavar='reference', required=True,
                         help='path to the reference genome fasta file')
@@ -42,15 +47,18 @@ def get_options():
                         type=int, choices=[0, 1],
                         help='mask scores representing annotated acceptor/donor gain and '
                              'unannotated acceptor/donor loss, defaults to 0')
-    parser.add_argument('-B', '--prediction-batch-size', metavar='prediction_batch_size', default=1, type=int,
+    parser.add_argument('-B', '--prediction_batch_size', metavar='prediction_batch_size', default=1, type=int,
                         help='number of predictions to process at a time, note a single vcf record '
                              'may have multiple predictions for overlapping genes and multiple alts')
-    parser.add_argument('-T', '--tensorflow-batch-size', metavar='tensorflow_batch_size', type=int,
+    parser.add_argument('-T', '--tensorflow_batch_size', metavar='tensorflow_batch_size', type=int,
                         help='tensorflow batch size for model predictions')
     parser.add_argument('-V', '--verbose', action='store_true', help='enables verbose logging')
     parser.add_argument('-t','--tmpdir', metavar='tmpdir',type=str,default='/tmp/',required=False,
                         help="Use Alternate location to store tmp files. (Note: B=4096 equals to roughly 15Gb of tmp files)")
-
+    parser.add_argument('-G','--gpus',metavar='gpus',type=str,default='all',required=False,
+                        help="Number of GPUs to use for SpliceAI. Provide 'all', or comma-seperated list of GPUs to use. eg '0,2' (first and third). Defaults to 'all'")
+    parser.add_argument('-S', '--simulated_gpus',metavar='simulated_gpus',default='0',type=int, required=False,
+                        help="For development: simulated logical gpus on a single physical device to simulate a multi-gpu environment")
     args = parser.parse_args()
 
     return args
@@ -58,116 +66,127 @@ def get_options():
 
 def main():
     args = get_options()
-
+    # logging
     if args.verbose:
         loglevel = logging.DEBUG
     else:
         loglevel = logging.INFO
-
     logging.basicConfig(
         format='%(asctime)s %(levelname)s %(name)s: - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         level=loglevel,
     )
-    
-    if None in [args.input, args.output, args.distance, args.mask]:
+    # sanity check for mandatory arguments    
+    if None in [args.input_data, args.output_data, args.distance, args.mask]:
         logging.error('Usage: spliceai [-h] [-I [input]] [-O [output]] -R reference -A annotation '
                       '[-D [distance]] [-M [mask]] [-B [prediction_batch_size]] [-T [tensorflow_batch_size]] [-t [tmp_location]]')
         exit()
 
-    # Default the tensorflow batch size to the prediction_batch_size if it's not supplied in the args
-    tensorflow_batch_size = args.tensorflow_batch_size if args.tensorflow_batch_size else args.prediction_batch_size
 
-    # load annotation data:
-    ann = Annotator(args.reference, args.annotation)
     ## revised code for batched analysis
     if args.prediction_batch_size > 1:
-        run_spliceai_batched(input_data=args.input, output_data=args.output, reference=args.reference,
-             ann=ann, distance=args.distance, mask=args.mask,
-             prediction_batch_size=args.prediction_batch_size,
-             tensorflow_batch_size=tensorflow_batch_size,tempdir=args.tmpdir)
-    else: # run original code:
-        run_spliceai(input_data=args.input, output_data=args.output, ann=ann, distance=args.distance, mask=args.mask)
+        # initialize the GPU and setup to estimate
+        devices,mem_per_logical = initialize_devices(args)
+        # Default the tensorflow batch size to the prediction_batch_size if it's not supplied in the args
+        args.tensorflow_batch_size = args.tensorflow_batch_size if args.tensorflow_batch_size else args.prediction_batch_size
+        
+        # load annotation data:
+        ann = Annotator(args.reference, args.annotation)
+        logging.debug("Annotation loaded.")
+        # run         
+        run_spliceai_batched(args,ann,devices,mem_per_logical)
 
-## revised logic to allow batched tensorflow analysis
-def run_spliceai_batched(input_data, output_data, reference, ann, distance, mask, prediction_batch_size,
-                 tensorflow_batch_size,tempdir):
+    else: # run original code:
+        # load annotation
+        ann = Annotator(args.reference, args.annotation)
+        # run scoring
+        run_spliceai(args, ann) # input_data=args.input, output_data=args.output, ann=ann, distance=args.distance, mask=args.mask)
+
+
+## revised logic to allow batched tensorflow analysis on multiple GPUs
+def run_spliceai_batched(args, ann,devices,mem_per_logical): #input_data, output_data, reference, ann, distance, mask, prediction_batch_size,
+                                #tensorflow_batch_size,tempdir,devices,args):
     
+    ## GOAL 
+    ##  - launch a reader that preps & pickles input vcf
+    ##  - launch per GPU/device, using sockets, a utility script that runs tasks from the queue on that device.
+    ##  - communicate through sockets : server threads issue items from the queue to worker clients
+    ##  - when all predictions are done, build the output vcf.
+
+
+    ## track start time
+    start_time = time.time()
+    ## variables:
+    input_data = args.input_data
+    output_data = args.output_data
+    distance = args.distance
+    mask = args.mask
+    prediction_batch_size = args.prediction_batch_size
+    tensorflow_batch_size = args.tensorflow_batch_size
+
     ## mk a temp directory 
-    tmpdir = tempfile.TemporaryDirectory(dir=tempdir)
-    logging.debug("tmp dir : {}".format(tmpdir.name))
-    # initialize the prediction object
-    batch = VCFPredictionBatch(
-            ann=ann,
-            output=output_data,
-            dist=distance,
-            mask=mask,
-            prediction_batch_size=prediction_batch_size,
-            tensorflow_batch_size=tensorflow_batch_size,
-            tmpdir = tmpdir
-        )
-    
+    tmpdir = tempfile.mkdtemp(dir=args.tmpdir) # TemporaryDirectory(dir=args.tmpdir)
+    #tmpdir = tmpdir.name
+    logging.debug("tmp dir : {}".format(tmpdir))
+        
     # creates a queue with max 10 ready-to-go batches in it.
-    # starts processing & filling the queue.
     prediction_queue = Queue(maxsize=10)
-    reader = Process(target=prepare_batches, kwargs={'ann':ann, 
-                                                     'input_data':input_data, 
-                                                     'prediction_batch_size':prediction_batch_size, 
-                                                     'prediction_queue': prediction_queue,
-                                                     'tmpdir':tmpdir,
-                                                     'dist' : distance
-                                                    })
+    # starts processing & filling the queue.  
+    reader_args={'ann':ann, 'args':args, 'tmpdir':tmpdir, 'prediction_queue': prediction_queue, 'nr_workers': len(devices)}
+    reader = Process(target=prepare_batches, kwargs=reader_args) 
     reader.start()    
     
-    # Process the queue.
-    batch.process_batches(prediction_queue)
+    worker_clients, worker_servers, devices = start_workers(prediction_queue,tmpdir,args,devices,mem_per_logical)
 
-    # join the reader process.
+    ## wait for everything to finish.
+    # readers sends finish signal to workers
+    logging.debug("Waiting for VCF reader to join")
     reader.join()
+    logging.debug("Reader joined!")
+    # clients receive signal, send it to servers.
+    logging.debug("Waiting for workers to join.")
+    for p in worker_clients:
+        # subprocesses : wait()
+        p.wait()
+    logging.debug("Workers are done!")
+    logging.debug("Waiting for servers to join.")
+    for p in worker_servers:
+        # mp processes : join()
+        p.join()
+    logging.debug("SErvers are done")
 
     # stats without writing phase
-    prediction_duration = time.time() - batch.start_time
-    
-    # write results.
+    prediction_duration = time.time() - start_time
+     
+    # write results. in/out from args, devices to get shelf names
+    logging.debug("Writing output file")
+    writer = VCFWriter(args=args,tmpdir=tmpdir,devices=devices,ann=ann)
+    writer.process()
+
     # Iterate over original list of vcf records again, reconstructing record with annotations from shelved data
     logging.debug("Writing output file")
-    vcf = pysam.VariantFile(input_data)
-    # have to update header again
-    header = vcf.header
-    header.add_line('##INFO=<ID=SpliceAI,Number=.,Type=String,Description="SpliceAIv1.3.1 variant '
-                'annotation. These include delta scores (DS) and delta positions (DP) for '
-                'acceptor gain (AG), acceptor loss (AL), donor gain (DG), and donor loss (DL). '
-                'Format: ALLELE|SYMBOL|DS_AG|DS_AL|DS_DG|DS_DL|DP_AG|DP_AL|DP_DG|DP_DL">')
-    try:
-        batch.output_data = pysam.VariantFile(output_data, mode='w', header=header)
-        
-    except (IOError, ValueError) as e:
-        logging.error('{}'.format(e))
-        exit()
-
-    batch.write_records(vcf)
-    # close shelf
-    batch.shelf_preds.close()
-    # close vcf
-    vcf.close()
-    batch.output_data.close()
-
-
+    
     ## stats
-    overall_duration = time.time() - batch.start_time
-    preds_per_sec = batch.total_predictions / prediction_duration
+    overall_duration = time.time() - start_time
+    preds_per_sec = writer.total_predictions / prediction_duration
     preds_per_hour = preds_per_sec * 60 * 60
     logging.info("Analysis Finished. Statistics:")
     logging.info("Total RunTime: {:0.2f}s".format(overall_duration))
     logging.info("Prediction RunTime: {:0.2f}s".format(prediction_duration))
-    logging.info("Processed Records: {}".format(batch.total_vcf_records))
-    logging.info("Processed Predictions: {}".format(batch.total_predictions))
+    logging.info("Processed Records: {}".format(writer.total_vcf_records))
+    logging.info("Processed Predictions: {}".format(writer.total_predictions))
     logging.info("Overall performance : {:0.2f} predictions/sec ; {:0.2f} predictions/hour".format(preds_per_sec, preds_per_hour))
 
 
 # original flow : record by record reading/predict/write
-def run_spliceai(input_data, output_data, ann, distance, mask):
-
+def run_spliceai(args, ann):
+    # assign variables
+    input_data = args.input_data
+    output_data = args_output_data
+    distance = args.distance
+    mask = args.mask
+    
+    # open infile
     try:
         vcf = pysam.VariantFile(input_data)
     except (IOError, ValueError) as e:

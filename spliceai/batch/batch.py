@@ -11,31 +11,104 @@ import numpy as np
 import os
 import tensorflow as tf
 import pickle
+import gc
+import socket
+import sys
+import argparse
 
-from spliceai.batch.batch_utils import extract_delta_scores, get_preds
+#from spliceai.batch.batch_utils import extract_delta_scores, get_preds
+sys.path.append('../../../spliceai')
+from spliceai.batch.batch_utils import   get_preds, initialize_devices
+from spliceai.utils import Annotator, get_delta_scores
 
-logger = logging.getLogger(__name__)
+
 
 SequenceType_REF = 0
 SequenceType_ALT = 1
 
 
+# options : revised from __main__
+def get_options():
+
+    parser = argparse.ArgumentParser(description='Version: 1.3.1')
+    parser.add_argument('-R', '--reference', metavar='reference', required=True,
+                        help='path to the reference genome fasta file')
+    parser.add_argument('-A', '--annotation',metavar='annotation', required=True,
+                        help='"grch37" (GENCODE V24lift37 canonical annotation file in '
+                             'package), "grch38" (GENCODE V24 canonical annotation file in '
+                             'package), or path to a similar custom gene annotation file')
+    parser.add_argument('-T', '--tensorflow_batch_size', metavar='tensorflow_batch_size', type=int,
+                        help='tensorflow batch size for model predictions')
+    parser.add_argument('-V', '--verbose', action='store_true', help='enables verbose logging')
+    parser.add_argument('-t','--tmpdir', metavar='tmpdir',type=str,default='/tmp/',required=False,
+                        help="Use Alternate location to store tmp files. (Note: B=4096 equals to roughly 15Gb of tmp files)")
+    parser.add_argument('-d','--device',metavar='device',type=str,required=True,
+                        help="CPU/GPU device to deploy worker on")
+    parser.add_argument('-S', '--simulated_gpus',metavar='simulated_gpus',default='0',type=int, required=False,
+                        help="For development: simulated logical gpus on a single physical device to simulate a multi-gpu environment")
+    parser.add_argument('-M', '--mem_per_logical', metavar='mem_per_logical',default=0,type=int, required=False, 
+                        help="For simulated GPUs assign this amount of memory (Mb)")
+    parser.add_argument('-G','--gpus',metavar='gpus',type=str,default='all',required=False,
+                        help="Number of GPUs to use for SpliceAI. Provide 'all', or comma-seperated list of GPUs to use. eg '0,2' (first and third). Defaults to 'all'")
+    args = parser.parse_args()
+
+    return args
+
+
+def main():
+    # get arguments
+    args = get_options()
+    if args.verbose:
+        loglevel = logging.DEBUG
+    else:
+        loglevel = logging.INFO
+    logging.basicConfig(
+        format='%(asctime)s %(levelname)s %(name)s: - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        level=loglevel,
+    )
+    logger = logging.getLogger(__name__)
+    
+    # initialize && assign device
+    devices = [x for x in initialize_devices(args)[0] if x.name == args.device]
+    if not devices:
+        logger.error(f"Specified device '{args.device}' not found!")
+        sys.exit(1)
+    device = devices[0].name
+    # get annotator
+    logger.info("loading annotations")
+    ann = Annotator(args.reference, args.annotation)
+
+
+    with tf.device(device):
+        logger.info(f"Working on device {device}")
+        # initialize the VCFPredictionBatch
+        worker = VCFPredictionBatch(ann=ann, tensorflow_batch_size=args.tensorflow_batch_size, tmpdir=args.tmpdir,device=device,logger=logger)
+        # start working !
+        worker.process_batches()
+    # done.
+
+
+
+
 # Class to handle predictions
 class VCFPredictionBatch:
-    def __init__(self, ann, output, dist, mask, prediction_batch_size, tensorflow_batch_size,tmpdir):
+    def __init__(self, ann, tensorflow_batch_size, tmpdir,device,logger):
         self.ann = ann
-        self.output = output
-        self.dist = dist
-        self.mask = mask
+        #self.output = output
+        #self.dist = dist
+        #self.mask = mask
+        self.device = device
         # This is the maximum number of predictions to parse/encode/predict at a time
-        self.prediction_batch_size = prediction_batch_size
+        #self.prediction_batch_size = prediction_batch_size
         # This is the size of the batch tensorflow will use to make the predictions
         self.tensorflow_batch_size = tensorflow_batch_size
         # track runtime
-        self.start_time = time.time()
+        #self.start_time = time.time()
         # Batch vars
         self.batches = {}
-        self.prepared_vcf_records = []
+        #self.prepared_vcf_records = []
+        self.logger = logger
 
         # Counts
         self.total_predictions = 0
@@ -46,29 +119,53 @@ class VCFPredictionBatch:
 
         # shelves to track data. 
         self.tmpdir = tmpdir 
-        # store batches of predictions using 'tensor_size|batch_idx' as key.
-        self.shelf_preds = shelve.open(os.path.join(self.tmpdir.name,"spliceai_preds.shelf"))
+        # store batches of predictions using 'tensor_size|batch_idx' as key. 
+        self.shelf_preds_name = f"spliceai_preds.{self.device[1:].replace(':','_')}.shelf"
+        self.shelf_preds = shelve.open(os.path.join(self.tmpdir, self.shelf_preds_name))
         
     # monitor the queue and submit incoming batches.
-    def process_batches(self,prediction_queue):
-        while True:
-            item =prediction_queue.get()
-            # reader submits None when all are queued.
-            if item is None:
-                break
-            # load pickled object
-            with open(os.path.join(self.tmpdir.name,item),'rb') as p:
-                data = pickle.load(p)
-            # remove from disk.
-            os.unlink(os.path.join(self.tmpdir.name,item))
-            self._process_batch(data['tensor_size'],data['batch_ix'], data['data'],data['length'])
-            
+    def process_batches(self):
+        with socket.socket() as s:
+            host = socket.gethostname()  # locahost
+            port = 54677
+            try:
+                s.connect((host,port))
+            except Exception as e:
+                raise(e)
+            # first response : server is running
+            res = s.recv(2048)
+            # then start polling queue
+            msg = "Ready for work..."
+
+            while True:
+                # send request for work
+                s.send(str.encode(msg))
+                res = s.recv(2048).decode('utf-8')
+                # response can be a job, 'hold on' for empty queue, or 'Done' for all finished.
+                if res == 'Hold On':
+                    msg = 'Ready for work...'
+                    time.sleep(0.1)
+                elif res == 'Finished':
+                    self.logger.info("Worker done. Shutting down")
+                    break
+                else:
+                    # got a batch id:
+                     with open(os.path.join(self.tmpdir,res),'rb') as p:
+                         data = pickle.load(p)
+                     # remove pickled batch
+                     os.unlink(os.path.join(self.tmpdir,res))
+                     # process : stats are send back as next 'ready for work' result.
+                     msg = self._process_batch(data['tensor_size'],data['batch_ix'], data['data'],data['length'])
+            # send signal to server thread to exit.
+            s.send(str.encode('Done'))
+            self.logger.info(f"Closing Worker on device {self.device}")
+
 
     def _process_batch(self,tensor_size,batch_ix, prediction_batch,nr_preds):
         start = time.time()
         
         # Sanity check dump of batch sizes
-        logger.debug('Tensor size : {} : batch_ix {} : nr.entries : {}'.format(tensor_size, batch_ix , nr_preds))
+        self.logger.debug('Tensor size : {} : batch_ix {} : nr.entries : {}'.format(tensor_size, batch_ix , nr_preds))
 
         # Run predictions && add to shelf.
         self.shelf_preds["{}|{}".format(tensor_size,batch_ix)] = np.mean(
@@ -79,66 +176,12 @@ class VCFPredictionBatch:
         duration = time.time() - start
         preds_per_sec = nr_preds / duration
         preds_per_hour = preds_per_sec * 60 * 60
-        logger.debug('Finished in {:0.2f}s, per sec: {:0.2f}, per hour: {:0.2f}'.format(duration,
-                                                                                        preds_per_sec,
-                                                                                        preds_per_hour))
 
-    # wrapper to write out all shelved variants
-    def write_records(self, vcf):
-        # open the shelf with records:
-        shelf_records = shelve.open(os.path.join(self.tmpdir.name,"spliceai_records.shelf"))
-        # parse vcf
-        line_idx = 0
-        batch = []
-        last_batch_key = ''
-        for record in vcf:
-            line_idx += 1  
-            # get prepared record by line_idx
-            prepared_record = shelf_records[str(line_idx)]
-            gene_info = prepared_record.gene_info
-            # (REF + #ALT ) * #genes   (* 5 models)
-            self.total_predictions += (1 + len(record.alts)) * len(gene_info.genes)
-            
-            all_y_ref = []
-            all_y_alt = []
+        msg = 'Device {} : Finished in {:0.2f}s, per sec: {:0.2f}, per hour: {:0.2f}'.format(self.device, duration, preds_per_sec, preds_per_hour)
+        self.logger.debug(msg)
+        return msg
 
-            # Each prediction in the batch is located and put into the correct y
-            for location in prepared_record.locations:
-                # No prediction here
-                if location.tensor_size == 0:
-                    if location.sequence_type == SequenceType_REF:
-                        all_y_ref.append(None)
-                    else:
-                        all_y_alt.append(None)
-                    continue
-                
-                # Extract the prediction from the batch into a list of predictions for this record
-                # recycle the batch variable if key is the same.
-                if not last_batch_key == "{}|{}".format(location.tensor_size,location.batch_ix):
-                    last_batch_key = "{}|{}".format(location.tensor_size,location.batch_ix)
-                    batch = self.shelf_preds[last_batch_key] # batch_preds[location.tensor_size]
-                    
-                if location.sequence_type == SequenceType_REF:
-                    all_y_ref.append(batch[[location.batch_index], :, :])
-                else:
-                    all_y_alt.append(batch[[location.batch_index], :, :])
-            delta_scores = extract_delta_scores(
-                all_y_ref=all_y_ref,
-                all_y_alt=all_y_alt,
-                record=record,
-                ann=self.ann,
-                dist_var=self.dist,
-                mask=self.mask,
-                gene_info=gene_info,
-            )
-
-            # If there are predictions, write them to the VCF INFO section
-            if len(delta_scores) > 0:
-                record.info['SpliceAI'] = delta_scores
-
-            self.output_data.write(record)
-        # close shelf again
-        self.total_vcf_records = line_idx
-        shelf_records.close()
     
-
+    
+if __name__ == '__main__':
+    main()
