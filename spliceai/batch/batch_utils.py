@@ -76,6 +76,7 @@ def start_workers(prediction_queue, tmpdir, args,devices,mem_per_logical):
 
     for device in devices:
         # launch the worker.
+        logger.info(f"Starting worker on device {device.name}")
         cmd = ["python",os.path.join(os.path.dirname(os.path.realpath(__file__)),"batch.py"),"-S",str(args.simulated_gpus),"-M",str(int(mem_per_logical)), "-t",tmpdir,"-d",device.name, '-R', args.reference, '-A', args.annotation, '-T', str(args.tensorflow_batch_size)]
         if args.verbose:
             cmd.append('-V')
@@ -91,7 +92,7 @@ def start_workers(prediction_queue, tmpdir, args,devices,mem_per_logical):
         p = Process(target=_process_server,args=(client,device.name,prediction_queue,))
         p.start()
         serverThreads.append(p)
-        logger.debug(f"Thread {device.name} activated!")
+        logger.info(f"Thread {device.name} activated!")
 
     return clientThreads, serverThreads, devices
 

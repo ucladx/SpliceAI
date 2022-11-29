@@ -75,15 +75,13 @@ def main():
         logger.error(f"Specified device '{args.device}' not found!")
         sys.exit(1)
     device = devices[0].name
-    # get annotator
-    logger.info("loading annotations")
-    ann = Annotator(args.reference, args.annotation)
-
 
     with tf.device(device):
         logger.info(f"Working on device {device}")
+        #logger.info("loading annotations")
+        #ann = Annotator(args.reference, args.annotation)
         # initialize the VCFPredictionBatch
-        worker = VCFPredictionBatch(ann=ann, tensorflow_batch_size=args.tensorflow_batch_size, tmpdir=args.tmpdir,device=device,logger=logger)
+        worker = VCFPredictionBatch(args=args,device=device,logger=logger) # , tensorflow_batch_size=args.tensorflow_batch_size, tmpdir=args.tmpdir,device=device,logger=logger)
         # start working !
         worker.process_batches()
     # done.
@@ -94,21 +92,23 @@ def main():
 # Class to handle predictions
 class VCFPredictionBatch:
     def __init__(self, ann, tensorflow_batch_size, tmpdir,device,logger):
-        self.ann = ann
-        #self.output = output
-        #self.dist = dist
-        #self.mask = mask
+        self.args = args
+        self.ann = None
+        self.tensorflow_batch_size = args.tensorflow_batch_size
+        self.tmpdir = args.tmpdir
         self.device = device
-        # This is the maximum number of predictions to parse/encode/predict at a time
-        #self.prediction_batch_size = prediction_batch_size
+        self.logger = logger
+
+        #self.ann = ann
+        #self.device = device
+        
         # This is the size of the batch tensorflow will use to make the predictions
-        self.tensorflow_batch_size = tensorflow_batch_size
-        # track runtime
-        #self.start_time = time.time()
+        # self.tensorflow_batch_size = tensorflow_batch_size
+        
         # Batch vars
         self.batches = {}
         #self.prepared_vcf_records = []
-        self.logger = logger
+        # self.logger = logger
 
         # Counts
         self.total_predictions = 0
@@ -137,6 +137,9 @@ class VCFPredictionBatch:
             # then start polling queue
             msg = "Ready for work..."
 
+            # first load annotation
+            if not self.ann:
+                self.ann = Annotator(self.args.reference, self.args.annotation)
             while True:
                 # send request for work
                 s.send(str.encode(msg))
