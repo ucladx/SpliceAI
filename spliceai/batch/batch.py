@@ -118,7 +118,7 @@ class VCFPredictionBatch:
         
 
         # shelves to track data. 
-        self.tmpdir = tmpdir 
+        #self.tmpdir = tmpdir 
         # store batches of predictions using 'tensor_size|batch_idx' as key. 
         self.shelf_preds_name = f"spliceai_preds.{self.device[1:].replace(':','_')}.shelf"
         self.shelf_preds = shelve.open(os.path.join(self.tmpdir, self.shelf_preds_name))
