@@ -7,8 +7,6 @@
 
 import logging
 import shelve
-#import pysam
-#import collections
 import os
 import gc
 import numpy as np
@@ -34,7 +32,7 @@ logger = logging.getLogger(__name__)
 ## INPUT ##
 ###########
 ## routine to create the batches for prediction.
-def prepare_batches(ann, args, tmpdir, prediction_queue,nr_workers): # input_data,prediction_batch_size, prediction_queue,tmpdir,dist):
+def prepare_batches(ann, args, tmpdir, prediction_queue,nr_workers): 
     # create the parser object
     vcf_reader = VCFReader(ann=ann, 
                            input_data=args.input_data,
@@ -76,15 +74,15 @@ def start_workers(prediction_queue, tmpdir, args,devices,mem_per_logical):
 
     for device in devices:
         # launch the worker.
-        logger.info(f"Starting worker on device {device.name}")
+        logger.info(f"Starting worker on device {device.name}, output is available under {tmpdir}")
         cmd = ["python",os.path.join(os.path.dirname(os.path.realpath(__file__)),"batch.py"),"-S",str(args.simulated_gpus),"-M",str(int(mem_per_logical)), "-t",tmpdir,"-d",device.name, '-R', args.reference, '-A', args.annotation, '-T', str(args.tensorflow_batch_size)]
         if args.verbose:
             cmd.append('-V')
-        #print(cmd)
+        logger.debug(cmd)
         fh_stdout = open(tmpdir+'/'+device.name.replace('/','_').replace(':','.')+'.stdout','w')
         fh_stderr = open(tmpdir+'/'+device.name.replace('/','_').replace(':','.')+'.stderr','w')
         
-        p = subprocess.Popen(cmd) # ,stdout=fh_stdout, stderr=fh_stderr)
+        p = subprocess.Popen(cmd ,stdout=fh_stdout, stderr=fh_stderr)
         clientThreads.append(p)
         ## then a new thread in the server for this connection.
         client, address = s.accept()
@@ -92,8 +90,7 @@ def start_workers(prediction_queue, tmpdir, args,devices,mem_per_logical):
         p = Process(target=_process_server,args=(client,device.name,prediction_queue,))
         p.start()
         serverThreads.append(p)
-        logger.info(f"Thread {device.name} activated!")
-        time.sleep(3)
+        logger.debug(f"Thread {device.name} activated!")
 
     return clientThreads, serverThreads, devices
 
@@ -107,7 +104,7 @@ def _process_server(clientsocket,device,queue):
             logger.debug(f"Stopping thread {device}")
             break
         elif not msg == 'Ready for work...':
-            logger.debug(msg)
+            logger.info(msg)
         # send/get new item
         try:
             item = queue.get(False) 
@@ -203,9 +200,6 @@ def initialize_devices(args):
     logger.info("Using the following devices for prediction:")
     for d in prediction_devices:
         logger.info(f"  - {d.name}")
-    # add verbosity
-    #if args.verbose:
-    #    tf.debugging.set_log_device_placement(True)
 
     return prediction_devices, mem_per_logical
 

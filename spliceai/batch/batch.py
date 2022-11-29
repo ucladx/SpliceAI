@@ -70,11 +70,10 @@ def main():
     logger = logging.getLogger(__name__)
     
     # initialize && assign device
-    # no simulation : set a physical
     if args.simulated_gpus > 0:
-
         devices = [x for x in initialize_devices(args)[0] if x.name == args.device]
     else:
+        # no simulation : expose only the requested device to tensor.
         devices = initialize_one_device(args)
 
 
@@ -84,10 +83,8 @@ def main():
     device = devices[0].name
     with tf.device(device):
         logger.info(f"Working on device {args.device}")
-        #logger.info("loading annotations")
-        #ann = Annotator(args.reference, args.annotation)
         # initialize the VCFPredictionBatch, pass (non-masked) device name
-        worker = VCFPredictionBatch(args=args,logger=logger) # , tensorflow_batch_size=args.tensorflow_batch_size, tmpdir=args.tmpdir,device=device,logger=logger)
+        worker = VCFPredictionBatch(args=args,logger=logger) 
         # start working !
         worker.process_batches()
     # done.
@@ -105,18 +102,6 @@ class VCFPredictionBatch:
         self.device = args.device
         self.logger = logger
 
-        # Batch vars
-        # self.batches = {}
-
-        # Counts
-        #self.total_predictions = 0
-        #self.total_vcf_records = 0
-        #self.batch_counters = {}
-        
-        
-
-        # shelves to track data. 
-        #self.tmpdir = tmpdir 
         # store batches of predictions using 'tensor_size|batch_idx' as key. 
         self.shelf_preds_name = f"spliceai_preds.{self.device[1:].replace(':','_')}.shelf"
         self.shelf_preds = shelve.open(os.path.join(self.tmpdir, self.shelf_preds_name))

@@ -61,6 +61,8 @@ Optional parameters:
  - ```-T```: Internal Tensorflow `predict()` batch size if you want something different from the `-B` value. (default: the `-B` value)
  - ```-V```: Enable verbose logging during run
  - ```-t```: Specify a location to create the temporary files
+ - ```-G```: Specify the GPU(s) to run on : either indexed (eg : 0,2) or 'all'. (default: 'all')
+ - ```-S```: Simulate *n* multiple GPUs on a single physical device. Used for development only, currently all values above 2 crashed due to memory issues. (default: 0) 
 
 **Batching Considerations:** 
 
@@ -101,6 +103,7 @@ are running the script on. Feel free to experiment, but some reasonable `-T` num
 
 <sup>(b)</sup> : Illumina implementation showed a memory leak with the installed versions of tf/keras/.... Values extrapolated from incomplete runs at the point of OOM. 
 
+*Note:* On a p3.8xlarge machine, hosting 4 V100 GPU's, we were able reach 1,379,505 predictions/hour ! This is a nearly linear scale-up.
 
 ### Details of SpliceAI INFO field:
 
@@ -171,9 +174,13 @@ donor_prob = y[0, :, 2]
 * Adds batch utility methods that split up what was all previously done in `get_delta_scores`. `encode_batch_record` handles what was in the first half, taking in the VCF record and generating one-hot encoded matrices for the ref/alts. `extract_delta_scores` handles the second half of the `get_delta_scores` by reassembling the annotations based on the batched predictions
 * Adds test cases to run a small file using a generated FASTA reference to test if the results are the same with no batching and with different batching sizes
 * Slightly modifies the entrypoint of running the code to allow for easier unit testing. Being able to pass in what would normally come from the argparser
+
+**Multi-GPU support** - Geert Vandeweyer (_November 2022_)
+
 * Offload more code to CPU (eg np to tensor conversion) to *only* perform predictions on the GPU
 * Implement queuing system to always have full batches ready for prediction
-* Implement new parameter, `--tmpdir` to support a custom tmp folder
+* Implement new parameter, `--tmpdir` to support a custom tmp folder to store prepped batches
+* Implement socket-based client/server approach to scale over multiple GPUs
 
 
 ### Contact

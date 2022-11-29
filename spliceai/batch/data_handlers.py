@@ -8,8 +8,6 @@ import pickle
 import tensorflow as tf
 import sys
 
-#from spliceai.utils import get_alt_gene_delta_score, is_record_valid, get_seq, \
-#    is_location_predictable, get_cov, get_wid, is_valid_alt_record, encode_seqs, create_unhandled_delta_score
 from spliceai.utils import get_cov, get_wid, get_seq, is_record_valid, is_location_predictable, \
         is_valid_alt_record, encode_seqs, create_unhandled_delta_score, get_alt_gene_delta_score
 
@@ -43,7 +41,6 @@ class VCFReader:
         self.dist = dist
         # Batch vars
         self.batches = {}
-        #self.prepared_vcf_records = []
 
         # Counts
         self.total_predictions = 0
@@ -56,7 +53,7 @@ class VCFReader:
         # shelves to track data. 
         self.tmpdir = tmpdir 
         # track records to have order correct
-        logging.info("Opening spliceai_records shelf")
+        logging.debug("Opening spliceai_records shelf")
         try:
             self.shelf_records = shelve.open(os.path.join(self.tmpdir,"spliceai_records.shelf"))
         except Exception as e:
@@ -161,7 +158,6 @@ class VCFReader:
                 self.batches[tensor_size] = []
                 self.batch_counters[tensor_size] += 1
 
-                #self._process_batch(tensor_size)
         
 
 
@@ -169,8 +165,6 @@ class VCFReader:
         """
         Method to process all the remaining items that have been added to the batches.
         """
-        #if len(self.prepared_vcf_records) > 0:
-        #    self._process_batch()
         logger.debug("Queueing remaining batches")
         for tensor_size in self.batch_counters:
                 if len(self.batches[tensor_size] ) > 0:
@@ -297,8 +291,6 @@ class VCFWriter:
     # wrapper to write out all shelved variants
     def _write_records(self):
         logger.debug("Writing output file")
-        # open the shelf with records:
-        #shelf_records = shelve.open(os.path.join(self.tmpdir.name,"spliceai_records.shelf"))
         # parse vcf
         line_idx = 0
         batch = []

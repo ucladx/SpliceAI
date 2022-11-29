@@ -100,12 +100,11 @@ def main():
         # load annotation
         ann = Annotator(args.reference, args.annotation)
         # run scoring
-        run_spliceai(args, ann) # input_data=args.input, output_data=args.output, ann=ann, distance=args.distance, mask=args.mask)
+        run_spliceai(args, ann) 
 
 
 ## revised logic to allow batched tensorflow analysis on multiple GPUs
-def run_spliceai_batched(args, ann,devices,mem_per_logical): #input_data, output_data, reference, ann, distance, mask, prediction_batch_size,
-                                #tensorflow_batch_size,tempdir,devices,args):
+def run_spliceai_batched(args, ann,devices,mem_per_logical): 
     
     ## GOAL 
     ##  - launch a reader that preps & pickles input vcf
@@ -127,7 +126,7 @@ def run_spliceai_batched(args, ann,devices,mem_per_logical): #input_data, output
     ## mk a temp directory 
     tmpdir = tempfile.mkdtemp(dir=args.tmpdir) # TemporaryDirectory(dir=args.tmpdir)
     #tmpdir = tmpdir.name
-    logging.debug("tmp dir : {}".format(tmpdir))
+    logging.info("Using tmpdir : {}".format(tmpdir))
         
     # creates a queue with max 10 ready-to-go batches in it.
     prediction_queue = Queue(maxsize=10)
@@ -153,19 +152,16 @@ def run_spliceai_batched(args, ann,devices,mem_per_logical): #input_data, output
     for p in worker_servers:
         # mp processes : join()
         p.join()
-    logging.debug("SErvers are done")
+    logging.debug("Servers are done")
 
     # stats without writing phase
     prediction_duration = time.time() - start_time
      
     # write results. in/out from args, devices to get shelf names
-    logging.debug("Writing output file")
+    logging.info("Writing output file")
     writer = VCFWriter(args=args,tmpdir=tmpdir,devices=devices,ann=ann)
     writer.process()
 
-    # Iterate over original list of vcf records again, reconstructing record with annotations from shelved data
-    logging.debug("Writing output file")
-   
     # clear out tmp
     shutil.rmtree(tmpdir)
     ## stats
