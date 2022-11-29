@@ -286,7 +286,7 @@ class VCFWriter:
         self.shelf_preds_name = f"spliceai_preds.shelf"
         self.shelf_preds = shelve.open(os.path.join(self.tmpdir, self.shelf_preds_name))
         for device in self.devices:
-            device_shelf_name = f"spliceai_preds.{device[1:].replace(':','_')}.shelf"
+            device_shelf_name = f"spliceai_preds.{device[1:].replace('physical_','').replace(':','_')}.shelf"
             device_shelf_preds = shelve.open(os.path.join(self.tmpdir, device_shelf_name))
             for x in device_shelf_preds:
                 self.shelf_preds[x] = device_shelf_preds[x]

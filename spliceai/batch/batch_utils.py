@@ -170,7 +170,8 @@ def initialize_devices(args):
                 raise(e)
             prediction_devices = tf.config.list_logical_devices('GPU')
         else:
-            prediction_devices = gpus
+            logger.info("Running on physical devices")
+            prediction_devices = tf.config.list_physical_devices('GPU')
 
         if not args.gpus.lower() == 'all':
             idxs = [int(x) for x in args.gpus.split(',')]
@@ -183,8 +184,8 @@ def initialize_devices(args):
     for d in prediction_devices:
         logger.info(f"  - {d.name}")
     # add verbosity
-    if args.verbose:
-        tf.debugging.set_log_device_placement(True)
+    #if args.verbose:
+    #    tf.debugging.set_log_device_placement(True)
 
     return prediction_devices, mem_per_logical
 

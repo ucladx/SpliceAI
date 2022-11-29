@@ -74,7 +74,7 @@ def main():
     if not devices:
         logger.error(f"Specified device '{args.device}' not found!")
         sys.exit(1)
-    device = devices[0].name
+    device = devices[0].name.replace('physical_','')
 
     with tf.device(device):
         logger.info(f"Working on device {device}")

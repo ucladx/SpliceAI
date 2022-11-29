@@ -9,7 +9,7 @@ import time
 import tempfile
 from multiprocessing import Process,Queue,Pool
 from functools import partial
-
+import shutil
 import tensorflow as tf
 import subprocess as sp
 import os
@@ -165,7 +165,9 @@ def run_spliceai_batched(args, ann,devices,mem_per_logical): #input_data, output
 
     # Iterate over original list of vcf records again, reconstructing record with annotations from shelved data
     logging.debug("Writing output file")
-    
+   
+    # clear out tmp
+    shutil.rmtree(tmpdir)
     ## stats
     overall_duration = time.time() - start_time
     preds_per_sec = writer.total_predictions / prediction_duration
