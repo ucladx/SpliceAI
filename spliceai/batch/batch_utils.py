@@ -142,36 +142,39 @@ def initialize_devices(args):
     ## need to simulate gpus ?
     gpus = tf.config.list_physical_devices('GPU')
     mem_per_logical = 0
-    if gpus and args.simulated_gpus > 1:
-        logger.warning(f"Simulating {args.simulated_gpus} logical GPUs on the first physical GPU device")
-        try:
-            gpu_mem_mb = _get_gpu_memory()
-        except Exception as e:
-            logger.error(f"Could not get GPU memory (needs nvidia-smi) : {e}")
-            sys.exit(1)
+    if gpus: 
+        if args.simulated_gpus > 1:
+            logger.warning(f"Simulating {args.simulated_gpus} logical GPUs on the first physical GPU device")
+            try:
+                gpu_mem_mb = _get_gpu_memory()
+            except Exception as e:
+                logger.error(f"Could not get GPU memory (needs nvidia-smi) : {e}")
+                sys.exit(1)
 
-        # Create n virtual GPUs with [available] / n GB memory each
-        if hasattr(args,'mem_per_logical'):
-            mem_per_logical = args.mem_per_logical
-        else:
-            mem_per_logical = (int(gpu_mem_mb[0])-2048) / args.simulated_gpus
+            # Create n virtual GPUs with [available] / n GB memory each
+            if hasattr(args,'mem_per_logical'):
+                mem_per_logical = args.mem_per_logical
+            else:
+                mem_per_logical = (int(gpu_mem_mb[0])-2048) / args.simulated_gpus
 
-        logger.info(f"Assigning {mem_per_logical}mb of GPU memory per simulated GPU.")
-        try:
-            device_list = [tf.config.LogicalDeviceConfiguration(memory_limit=mem_per_logical)] * args.simulated_gpus
-            tf.config.set_logical_device_configuration(
-                gpus[0],
-                device_list)
-            logical_gpus = tf.config.list_logical_devices('GPU')
+            logger.info(f"Assigning {mem_per_logical}mb of GPU memory per simulated GPU.")
+            try:
+                device_list = [tf.config.LogicalDeviceConfiguration(memory_limit=mem_per_logical)] * args.simulated_gpus
+                tf.config.set_logical_device_configuration(
+                    gpus[0],
+                    device_list)
+                logical_gpus = tf.config.list_logical_devices('GPU')
            
-        except RuntimeError as e:
-            # Virtual devices must be set before GPUs have been initialized
-            raise(e)
-    if gpus:
-        prediction_devices = tf.config.list_logical_devices('GPU')
+            except RuntimeError as e:
+                # Virtual devices must be set before GPUs have been initialized
+                raise(e)
+            prediction_devices = tf.config.list_logical_devices('GPU')
+        else:
+            prediction_devices = gpus
+
         if not args.gpus.lower() == 'all':
             idxs = [int(x) for x in args.gpus.split(',')]
-            prediction_devices = [prediction_devices[x] for x in idx]
+            prediction_devices = [prediction_devices[x] for x in idxs]
     else:
         # run on cpu
         prediction_devices = tf.config.list_logical_devices('CPU')[0]
