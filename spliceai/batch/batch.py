@@ -72,6 +72,7 @@ def main():
     # initialize && assign device
     # no simulation : set a physical
     if args.simulated_gpus > 0:
+
         devices = [x for x in initialize_devices(args)[0] if x.name == args.device]
     else:
         devices = initialize_one_device(args)
@@ -82,11 +83,11 @@ def main():
         sys.exit(1)
     device = devices[0].name
     with tf.device(device):
-        logger.info(f"Working on device {device}")
+        logger.info(f"Working on device {args.device}")
         #logger.info("loading annotations")
         #ann = Annotator(args.reference, args.annotation)
-        # initialize the VCFPredictionBatch
-        worker = VCFPredictionBatch(args=args,device=device,logger=logger) # , tensorflow_batch_size=args.tensorflow_batch_size, tmpdir=args.tmpdir,device=device,logger=logger)
+        # initialize the VCFPredictionBatch, pass (non-masked) device name
+        worker = VCFPredictionBatch(args=args,logger=logger) # , tensorflow_batch_size=args.tensorflow_batch_size, tmpdir=args.tmpdir,device=device,logger=logger)
         # start working !
         worker.process_batches()
     # done.
@@ -101,24 +102,16 @@ class VCFPredictionBatch:
         self.ann = None
         self.tensorflow_batch_size = args.tensorflow_batch_size
         self.tmpdir = args.tmpdir
-        self.device = device
+        self.device = args.device
         self.logger = logger
 
-        #self.ann = ann
-        #self.device = device
-        
-        # This is the size of the batch tensorflow will use to make the predictions
-        # self.tensorflow_batch_size = tensorflow_batch_size
-        
         # Batch vars
-        self.batches = {}
-        #self.prepared_vcf_records = []
-        # self.logger = logger
+        # self.batches = {}
 
         # Counts
-        self.total_predictions = 0
-        self.total_vcf_records = 0
-        self.batch_counters = {}
+        #self.total_predictions = 0
+        #self.total_vcf_records = 0
+        #self.batch_counters = {}
         
         
 
