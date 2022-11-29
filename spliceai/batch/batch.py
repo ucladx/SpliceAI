@@ -18,7 +18,7 @@ import argparse
 
 #from spliceai.batch.batch_utils import extract_delta_scores, get_preds
 sys.path.append('../../../spliceai')
-from spliceai.batch.batch_utils import   get_preds, initialize_devices
+from spliceai.batch.batch_utils import   get_preds, initialize_devices, initialize_one_device
 from spliceai.utils import Annotator, get_delta_scores
 
 
@@ -70,12 +70,17 @@ def main():
     logger = logging.getLogger(__name__)
     
     # initialize && assign device
-    devices = [x for x in initialize_devices(args)[0] if x.name == args.device]
+    # no simulation : set a physical
+    if args.simulated_gpus > 0:
+        devices = [x for x in initialize_devices(args)[0] if x.name == args.device]
+    else:
+        devices = initialize_one_device(args)
+
+
     if not devices:
         logger.error(f"Specified device '{args.device}' not found!")
         sys.exit(1)
-    device = devices[0].name.replace('physical_','')
-
+    device = devices[0].name
     with tf.device(device):
         logger.info(f"Working on device {device}")
         #logger.info("loading annotations")

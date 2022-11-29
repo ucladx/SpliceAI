@@ -137,6 +137,29 @@ def get_preds(ann, x, batch_size=32):
     return predictions
     
 
+## initialize a single device, hide others (only for non-simulated gpus)
+def initialize_one_device(args):
+    gpus = tf.config.list_physical_devices('GPU')
+    if not gpus:
+        return tf.config.list_logical_devices('CPU')
+    # get the index of specified device.
+    idx = None
+    for i in range(len(gpus)):
+        if gpus[i].name.replace('physical_','') == args.device:
+            idx = i
+            break
+    if idx is None:
+        logger.error("Device not found")
+        logger.debug(idx)
+        logger.debug(args.device)
+        logger.debug([x.name.replace('physical_','') for x in gpus])
+        raise Exception(f"specified device '{args.device}' not found.")
+    # set visible
+    tf.config.set_visible_devices(gpus[idx], 'GPU')
+    logical_devices = tf.config.list_logical_devices('GPU')
+    return logical_devices
+
+
 ## management routine to initialize gpu/cpu devices and do simulated logical devices if needed
 def initialize_devices(args):
     ## need to simulate gpus ?
@@ -155,7 +178,7 @@ def initialize_devices(args):
             if hasattr(args,'mem_per_logical'):
                 mem_per_logical = args.mem_per_logical
             else:
-                mem_per_logical = (int(gpu_mem_mb[0])-2048) / args.simulated_gpus
+                mem_per_logical = int((gpu_mem_mb[0]-2048) / args.simulated_gpus)
 
             logger.info(f"Assigning {mem_per_logical}mb of GPU memory per simulated GPU.")
             try:
@@ -168,10 +191,7 @@ def initialize_devices(args):
             except RuntimeError as e:
                 # Virtual devices must be set before GPUs have been initialized
                 raise(e)
-            prediction_devices = tf.config.list_logical_devices('GPU')
-        else:
-            logger.info("Running on physical devices")
-            prediction_devices = tf.config.list_physical_devices('GPU')
+        prediction_devices = tf.config.list_logical_devices('GPU')
 
         if not args.gpus.lower() == 'all':
             idxs = [int(x) for x in args.gpus.split(',')]
