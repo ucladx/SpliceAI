@@ -139,7 +139,8 @@ class VCFPredictionBatch:
 
             # first load annotation
             if not self.ann:
-                self.ann = Annotator(self.args.reference, self.args.annotation)
+                # load annotation 
+                self.ann = Annotator(self.args.reference, self.args.annotation,cpu=True)
             while True:
                 # send request for work
                 s.send(str.encode(msg))

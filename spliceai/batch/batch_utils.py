@@ -93,6 +93,7 @@ def start_workers(prediction_queue, tmpdir, args,devices,mem_per_logical):
         p.start()
         serverThreads.append(p)
         logger.info(f"Thread {device.name} activated!")
+        time.sleep(3)
 
     return clientThreads, serverThreads, devices
 

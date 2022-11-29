@@ -20,7 +20,7 @@ GeneInfo = collections.namedtuple('GeneInfo', 'genes strands idxs')
 
 class Annotator:
 
-    def __init__(self, ref_fasta, annotations):
+    def __init__(self, ref_fasta, annotations,cpu=True):
 
         if annotations == 'grch37':
             annotations = resource_filename(__name__, 'annotations/grch37.txt')
@@ -52,7 +52,10 @@ class Annotator:
             exit()
         paths = ('models/spliceai{}.h5'.format(x) for x in range(1, 6))
         # use CPU memory for loading models, to prevent gpu memory allocation. 
-        with tf.device('CPU:0'):
+        if cpu:
+            with tf.device('CPU:0'):
+                self.models = [load_model(resource_filename(__name__, x)) for x in paths]
+        else:
             self.models = [load_model(resource_filename(__name__, x)) for x in paths]
 
     def get_name_and_strand(self, chrom, pos):
