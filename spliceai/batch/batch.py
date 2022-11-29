@@ -91,7 +91,7 @@ def main():
 
 # Class to handle predictions
 class VCFPredictionBatch:
-    def __init__(self, ann, tensorflow_batch_size, tmpdir,device,logger):
+    def __init__(self, args, device, logger): # ann, tensorflow_batch_size, tmpdir,device,logger):
         self.args = args
         self.ann = None
         self.tensorflow_batch_size = args.tensorflow_batch_size
