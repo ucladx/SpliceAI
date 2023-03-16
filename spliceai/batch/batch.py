@@ -31,6 +31,7 @@ SequenceType_ALT = 1
 def get_options():
 
     parser = argparse.ArgumentParser(description='Version: 1.3.1')
+    parser.add_argument('-P', '--port', metavar='port', required=True, type=int)    
     parser.add_argument('-R', '--reference', metavar='reference', required=True,
                         help='path to the reference genome fasta file')
     parser.add_argument('-A', '--annotation',metavar='annotation', required=True,
@@ -110,7 +111,7 @@ class VCFPredictionBatch:
     def process_batches(self):
         with socket.socket() as s:
             host = socket.gethostname()  # locahost
-            port = 54677
+            port = self.args.port
             try:
                 s.connect((host,port))
             except Exception as e:
