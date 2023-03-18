@@ -29,6 +29,8 @@ except ImportError:
 def get_options():
 
     parser = argparse.ArgumentParser(description='Version: 1.3.1')
+    parser.add_argument('-P', '--port', metavar='port', type=int, 
+                        help='option to change port if several GPUs on one network')
     parser.add_argument('-I', '--input_data', metavar='input', nargs='?', default=std_in,
                         help='path to the input VCF file, defaults to standard in')
     parser.add_argument('-O', '--output_data', metavar='output', nargs='?', default=std_out,
@@ -81,7 +83,7 @@ def main():
         logging.error('Usage: spliceai [-h] [-I [input]] [-O [output]] -R reference -A annotation '
                       '[-D [distance]] [-M [mask]] [-B [prediction_batch_size]] [-T [tensorflow_batch_size]] [-t [tmp_location]]')
         exit()
-
+    logging.debug(f"PORT:{args.port}")
 
     ## revised code for batched analysis
     if args.prediction_batch_size > 1:

@@ -61,7 +61,9 @@ def start_workers(prediction_queue, tmpdir, args,devices,mem_per_logical):
     # start server socket 
     s = socket.socket()
     host = socket.gethostname()  # locahost
-    port = 54677
+    port = args.port
+    logger.info(f"Starting server: {host}:{port}")
+
     try:
        s.bind((host,port))
     except Exception as e:
@@ -75,7 +77,7 @@ def start_workers(prediction_queue, tmpdir, args,devices,mem_per_logical):
     for device in devices:
         # launch the worker.
         logger.info(f"Starting worker on device {device.name}, output is available under {tmpdir}")
-        cmd = ["python",os.path.join(os.path.dirname(os.path.realpath(__file__)),"batch.py"),"-S",str(args.simulated_gpus),"-M",str(int(mem_per_logical)), "-t",tmpdir,"-d",device.name, '-R', args.reference, '-A', args.annotation, '-T', str(args.tensorflow_batch_size)]
+        cmd = ["python",os.path.join(os.path.dirname(os.path.realpath(__file__)),"batch.py"),"-S",str(args.simulated_gpus),"-M",str(int(mem_per_logical)), "-t",tmpdir,"-d",device.name, '-R', args.reference, '-A', args.annotation, '-T', str(args.tensorflow_batch_size), '-P', str(args.port)]
         if args.verbose:
             cmd.append('-V')
         logger.debug(cmd)
