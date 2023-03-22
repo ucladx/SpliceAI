@@ -62,7 +62,8 @@ Optional parameters:
  - ```-V```: Enable verbose logging during run
  - ```-t```: Specify a location to create the temporary files
  - ```-G```: Specify the GPU(s) to run on : either indexed (eg : 0,2) or 'all'. (default: 'all')
- - ```-S```: Simulate *n* multiple GPUs on a single physical device. Used for development only, currently all values above 2 crashed due to memory issues. (default: 0) 
+ - ```-S```: Simulate *n* multiple GPUs on a single physical device. Used for development only, currently all values above 2 crashed due to memory issues. (default: 0)
+ - ```-P```: Port to use when connecting to the socket (default: 54677, only used in batch mode).
 
 **Batching Considerations:** 
 
@@ -79,24 +80,24 @@ are running the script on. Feel free to experiment, but some reasonable `-T` num
 
 *Benchmark results*
 
-| Type     | Implementation | Total Time  | Speed (predictions / hour)  |
-| -------- | -------------- | ----------- | --------------------------  |
-| CPU (intel i5-8365U)<sup>a</sup> | illumina    | ~100h | ~1000 pred/h |
-|                       | invitae     | ~39h | ~4500 pred/h |
-|                       | invitae v2  | ~35h | ~5000 pred/h |
-|                       | invitae v2 optimal | ~35h | ~5000 pred/h | 
-| K80 GPU (AWS p2.large) | illumina</sup>b</sup> | ~25 h  | ~7000 pred/h  |
-|               | invitae    | 242m | ~43,000 pred / h |
-|               | invitae v2 | 213m | ~50,000 pred / h |
-|               | invitae v2 optimal | 188 m | ~56,000 pred / h |
-| GeForce RTX 2070 SUPER GPU (desktop) |  illumina</sup>b</sup>    | ~10 h | ~ 17,000 pred/h |
-|               | invitae    | 76m | ~137,000 pred / h |
-|               | invitae v2 | 63m | ~166,000 pred / h |
-|               | invitae v2 optimal | 52m | ~200,000 pred / h |
-| V100 GPU (AWS p3.xlarge) | illumina<sup>b</sup> | ~10h | ~18,000 pred/h |
-|                | invitae     | 78m | ~135,000 pred / h |
-|                | invitae v2  | 54m | ~190,000 pred / h |  
-|                | invitae v2 optimal | 31 m | ~335,000 pred / h |
+| Type                                 | Implementation        | Total Time | Speed (predictions / hour) |
+|--------------------------------------|-----------------------|------------|----------------------------|
+| CPU (intel i5-8365U)<sup>a</sup>     | illumina              | ~100h      | ~1000 pred/h               |
+|                                      | invitae               | ~39h       | ~4500 pred/h               |
+|                                      | invitae v2            | ~35h       | ~5000 pred/h               |
+|                                      | invitae v2 optimal    | ~35h       | ~5000 pred/h               | 
+| K80 GPU (AWS p2.large)               | illumina</sup>b</sup> | ~25 h      | ~7000 pred/h               |
+|                                      | invitae               | 242m       | ~43,000 pred / h           |
+|                                      | invitae v2            | 213m       | ~50,000 pred / h           |
+|                                      | invitae v2 optimal    | 188 m      | ~56,000 pred / h           |
+| GeForce RTX 2070 SUPER GPU (desktop) | illumina</sup>b</sup> | ~10 h      | ~ 17,000 pred/h            |
+|                                      | invitae               | 76m        | ~137,000 pred / h          |
+|                                      | invitae v2            | 63m        | ~166,000 pred / h          |
+|                                      | invitae v2 optimal    | 52m        | ~200,000 pred / h          |
+| V100 GPU (AWS p3.xlarge)             | illumina<sup>b</sup>  | ~10h       | ~18,000 pred/h             |
+|                                      | invitae               | 78m        | ~135,000 pred / h          |
+|                                      | invitae v2            | 54m        | ~190,000 pred / h          |  
+|                                      | invitae v2 optimal    | 31 m       | ~335,000 pred / h          |
   
 
 <sup>(a)</sup> : Extrapolated from first 500 variants
@@ -107,18 +108,18 @@ are running the script on. Feel free to experiment, but some reasonable `-T` num
 
 ### Details of SpliceAI INFO field:
 
-|    ID    | Description |
-| -------- | ----------- |
-|  ALLELE  | Alternate allele |
-|  SYMBOL  | Gene symbol |
-|  DS_AG   | Delta score (acceptor gain) |
-|  DS_AL   | Delta score (acceptor loss) |
-|  DS_DG   | Delta score (donor gain) |
-|  DS_DL   | Delta score (donor loss) |
-|  DP_AG   | Delta position (acceptor gain) |
-|  DP_AL   | Delta position (acceptor loss) |
-|  DP_DG   | Delta position (donor gain) |
-|  DP_DL   | Delta position (donor loss) |
+| ID     | Description                    |
+|--------|--------------------------------|
+| ALLELE | Alternate allele               |
+| SYMBOL | Gene symbol                    |
+| DS_AG  | Delta score (acceptor gain)    |
+| DS_AL  | Delta score (acceptor loss)    |
+| DS_DG  | Delta score (donor gain)       |
+| DS_DL  | Delta score (donor loss)       |
+| DP_AG  | Delta position (acceptor gain) |
+| DP_AL  | Delta position (acceptor loss) |
+| DP_DG  | Delta position (donor gain)    |
+| DP_DL  | Delta position (donor loss)    |
 
 Delta score of a variant, defined as the maximum of (DS_AG, DS_AL, DS_DG, DS_DL), ranges from 0 to 1 and can be interpreted as the probability of the variant being splice-altering. In the paper, a detailed characterization is provided for 0.2 (high recall), 0.5 (recommended), and 0.8 (high precision) cutoffs. Delta position conveys information about the location where splicing changes relative to the variant position (positive values are downstream of the variant, negative values are upstream).
 
