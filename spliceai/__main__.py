@@ -29,8 +29,8 @@ except ImportError:
 def get_options():
 
     parser = argparse.ArgumentParser(description='Version: 1.3.1')
-    parser.add_argument('-P', '--port', metavar='port', type=int, 
-                        help='option to change port if several GPUs on one network')
+    parser.add_argument('-P', '--port', metavar='port', type=int, default=54677,
+                        help='option to change port if several GPUs on one network (default: 54677)')
     parser.add_argument('-I', '--input_data', metavar='input', nargs='?', default=std_in,
                         help='path to the input VCF file, defaults to standard in')
     parser.add_argument('-O', '--output_data', metavar='output', nargs='?', default=std_out,
