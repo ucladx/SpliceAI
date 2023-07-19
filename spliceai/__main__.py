@@ -15,7 +15,7 @@ import subprocess as sp
 import os
 
 from spliceai.batch.batch_utils import prepare_batches,  start_workers,initialize_devices
-from spliceai.utils import Annotator, get_delta_scores
+from spliceai.utils import Annotator, GffAnnotator, get_delta_scores
 from spliceai.batch.data_handlers import VCFWriter
 
 try:
